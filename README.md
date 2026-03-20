@@ -1,6 +1,6 @@
 # Nonaga
 
-A browser-playable implementation of [Nonaga](https://boardgamegeek.com/boardgame/217774/nonaga) with an AlphaZero-style AI opponent.
+A browser-playable implementation of Nonaga with an AlphaZero-style AI opponent.
 
 **[Play it now](https://raggedr.github.io/nonaga/)** | [Rules (PDF)](https://www.steffen-spiele.de/files/Nonaga-eng.pdf)
 
