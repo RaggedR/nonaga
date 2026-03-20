@@ -2,7 +2,7 @@
 
 A browser-playable implementation of Nonaga with an AlphaZero-style AI opponent.
 
-**[Play it now](https://raggedr.github.io/nonaga/)** | [Rules (PDF)](https://www.steffen-spiele.de/files/Nonaga-eng.pdf)
+**[Play it now](https://raggedr.github.io/nonaga/)** | [Rules (PDF)](https://www.steffen-spiele.de/fileadmin/media/Spiele/Nonaga/Nonaga_EN.pdf)
 
 Or run locally:
 
