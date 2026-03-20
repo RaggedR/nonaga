@@ -1,12 +1,13 @@
 # Nonaga
 
-A browser-playable implementation of the [Nonaga](https://boardgamegeek.com/boardgame/217774/nonaga) board game with an AlphaZero-style AI opponent.
+A browser-playable implementation of [Nonaga](https://boardgamegeek.com/boardgame/217774/nonaga) with an AlphaZero-style AI opponent.
 
-## Play
+**[Play it now](https://raggedr.github.io/nonaga/)** | [Rules (PDF)](https://www.steffen-spiele.de/files/Nonaga-eng.pdf)
+
+Or run locally:
 
 ```bash
 cd web && python -m http.server 8000
-# Open http://localhost:8000
 ```
 
 Drag or click pieces to move them. The AI plays as Player 2 (teal).
