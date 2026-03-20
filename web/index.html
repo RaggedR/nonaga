@@ -1,0 +1,1473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nonaga</title>
+<style>
+:root {
+  --bg: #1c1410;
+  --bg2: #2a1f18;
+  --accent: #e94560;
+  --accent2: #0f3460;
+  --tile: #2a2a4a;
+  --tile-hover: #3a3a5a;
+  --tile-edge: #4a4a6a;
+  --p1: #e94560;
+  --p1-light: #ff6b81;
+  --p2: #4ecdc4;
+  --p2-light: #7ee8e0;
+  --text: #e8ddd0;
+  --text-dim: #9a8b7a;
+  --gold: #f7c948;
+  --accent-amber: #d4915e;
+  --accent-gold: #e8a862;
+  --frame-border: #3d2b1e;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 50%, var(--bg) 100%);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 1rem;
+  user-select: none;
+}
+h1 {
+  font-size: 2rem;
+  letter-spacing: 0.3em;
+  color: var(--accent-gold);
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+#status {
+  font-size: 1.05rem;
+  color: var(--accent-gold);
+  font-weight: 600;
+  margin-bottom: 1rem;
+  min-height: 1.5em;
+  padding: 6px 20px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+#board-container {
+  position: relative;
+  width: min(90vw, 600px);
+  height: min(90vw, 600px);
+  padding: 20px;
+  background: linear-gradient(135deg, #4a3525, #3d2b1e 40%, #2e1f15 70%, #3d2b1e);
+  border-radius: 18px;
+  box-shadow:
+    0 2px 4px rgba(0,0,0,0.6),
+    0 12px 40px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+svg#board {
+  width: 100%;
+  height: 100%;
+}
+.tile {
+  fill: url(#grad-tile);
+  stroke: #1a1a3a;
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: fill 0.15s, stroke 0.15s;
+}
+.tile:hover { fill: var(--tile-hover); }
+.tile.edge { stroke: var(--tile-edge); stroke-dasharray: 4 2; }
+.tile.removable { cursor: pointer; }
+.tile.removable:hover { fill: #4a2a4a; stroke: var(--accent); stroke-width: 2; }
+.tile.selected-tile { fill: #5a3a5a; stroke: var(--accent); stroke-width: 2.5; }
+.tile.placement { fill: transparent; stroke: var(--gold); stroke-width: 2; stroke-dasharray: 6 3; opacity: 0.7; cursor: pointer; }
+.tile.placement:hover { fill: rgba(247,201,72,0.15); opacity: 1; }
+.tile.highlight { fill: rgba(247,201,72,0.2); stroke: var(--gold); stroke-width: 2; }
+.tile.last-move { stroke: var(--accent-gold); stroke-width: 2.5; stroke-dasharray: none; }
+.tile-ghost {
+  fill: none;
+  stroke: var(--accent-amber);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  pointer-events: none;
+  animation: ghost-fade 2.5s ease-out forwards;
+}
+@keyframes ghost-fade {
+  0% { opacity: 0.7; }
+  70% { opacity: 0.4; }
+  100% { opacity: 0; }
+}
+.piece {
+  cursor: pointer;
+  transition: filter 0.15s;
+  filter: drop-shadow(0 3px 5px rgba(0,0,0,0.6));
+}
+.piece:hover { filter: drop-shadow(0 0 12px rgba(255,255,255,0.5)); }
+.piece.selected { filter: drop-shadow(0 0 10px var(--gold)) drop-shadow(0 0 20px rgba(247,201,72,0.4)); }
+.piece.ghost-src { opacity: 0.25; }
+.piece.p1 { fill: url(#grad-p1); stroke: #8b1a2e; stroke-width: 1.5; }
+.piece.p2 { fill: url(#grad-p2); stroke: #1a6b62; stroke-width: 1.5; }
+.piece.p1:hover { fill: url(#grad-p1-hover); }
+.piece.p2:hover { fill: url(#grad-p2-hover); }
+.move-dot {
+  fill: var(--gold);
+  opacity: 0.6;
+  cursor: pointer;
+  filter: drop-shadow(0 0 4px rgba(247,201,72,0.5));
+}
+.move-dot:hover { opacity: 1; }
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(0.85); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 0.9; }
+}
+#controls {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+button {
+  background: linear-gradient(135deg, #4a3525, #3d2b1e);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: all 0.15s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+button:hover { background: linear-gradient(135deg, #5a4535, #4d3b2e); transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
+button:active { transform: translateY(0); }
+button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+#info {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  text-align: center;
+}
+.thinking {
+  display: inline-block;
+  animation: pulse 1s infinite;
+}
+.spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid var(--accent-gold); border-top-color: transparent;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  vertical-align: middle; margin-right: 6px;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+#turn-indicator {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px currentColor;
+}
+/* Drag ghost */
+#drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  transform: translate(-50%, -50%);
+  display: none;
+}
+@media (max-width: 580px) {
+  body { padding: 12px; }
+  h1 { font-size: 1.5rem; }
+  #board-container { padding: 12px; border-radius: 14px; }
+}
+</style>
+</head>
+<body>
+<h1>NONAGA</h1>
+<div id="status"><span id="turn-indicator" style="background:var(--p1)"></span>Player 1's turn — move a piece</div>
+<div id="board-container"><svg id="board" viewBox="-10 -10 620 620">
+  <defs>
+    <!-- P1 piece gradient (red) -->
+    <radialGradient id="grad-p1" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#ff8a9e"/>
+      <stop offset="50%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#9b1b30"/>
+    </radialGradient>
+    <radialGradient id="grad-p1-hover" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#ffaabb"/>
+      <stop offset="50%" stop-color="#ff6b81"/>
+      <stop offset="100%" stop-color="#c02040"/>
+    </radialGradient>
+    <!-- P2 piece gradient (teal) -->
+    <radialGradient id="grad-p2" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#7ee8e0"/>
+      <stop offset="50%" stop-color="#4ecdc4"/>
+      <stop offset="100%" stop-color="#1a7a70"/>
+    </radialGradient>
+    <radialGradient id="grad-p2-hover" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#a0f0ea"/>
+      <stop offset="50%" stop-color="#6eddd5"/>
+      <stop offset="100%" stop-color="#2a8a82"/>
+    </radialGradient>
+    <!-- Tile gradient (subtle depth) -->
+    <radialGradient id="grad-tile" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#353558"/>
+      <stop offset="100%" stop-color="#22223a"/>
+    </radialGradient>
+  </defs>
+</svg></div>
+<div id="drag-ghost"></div>
+<div id="controls">
+  <button id="btn-new" onclick="newGame()">New Game</button>
+  <button id="btn-undo" onclick="undo()" disabled>Undo</button>
+  <button id="btn-ai" onclick="toggleAI()">AI: Off</button>
+  <button id="btn-ai-move" onclick="aiMove()">AI Move</button>
+  <button id="btn-coords" onclick="toggleCoords()">Coords</button>
+</div>
+<div id="info">Drag or click a piece to move. AI plays as Player 2.</div>
+
+<script>
+// ============================================================
+// Hex Grid (port of hex_grid.py)
+// ============================================================
+const GRID_SIZE = 7;
+const CENTER = [3, 3];
+const DIRECTIONS = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+
+function hexDist(q, r) {
+  const dq = q - 3, dr = r - 3;
+  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
+}
+
+function qrToIdx(q, r) { return r * GRID_SIZE + q; }
+function idxToQr(idx) { return [idx % GRID_SIZE, Math.floor(idx / GRID_SIZE)]; }
+
+const VALID_CELLS = [];
+const VALID_SET = new Set();
+for (let r = 0; r < GRID_SIZE; r++) {
+  for (let q = 0; q < GRID_SIZE; q++) {
+    if (hexDist(q, r) <= 3) {
+      VALID_CELLS.push([q, r]);
+      VALID_SET.add(qrToIdx(q, r));
+    }
+  }
+}
+
+const NEIGHBORS = {};
+for (const [q, r] of VALID_CELLS) {
+  const idx = qrToIdx(q, r);
+  const nbrs = [];
+  for (const [dq, dr] of DIRECTIONS) {
+    const nq = q + dq, nr = r + dr;
+    if (nq >= 0 && nq < GRID_SIZE && nr >= 0 && nr < GRID_SIZE &&
+        VALID_SET.has(qrToIdx(nq, nr))) nbrs.push(qrToIdx(nq, nr));
+  }
+  NEIGHBORS[idx] = nbrs;
+}
+
+function slide(idx, dir, tileSet, occSet) {
+  const [q0, r0] = idxToQr(idx);
+  const [dq, dr] = DIRECTIONS[dir];
+  let landing = null, cq = q0, cr = r0;
+  while (true) {
+    const nq = cq + dq, nr = cr + dr;
+    if (nq < 0 || nq >= GRID_SIZE || nr < 0 || nr >= GRID_SIZE) break;
+    const nc = qrToIdx(nq, nr);
+    if (!tileSet.has(nc)) break;
+    if (occSet.has(nc)) break;
+    cq = nq; cr = nr; landing = nc;
+  }
+  return landing;
+}
+
+// ============================================================
+// Game State (port of nonaga.py)
+// ============================================================
+const PLY_PIECE = 0, PLY_TILE = 1;
+const P1 = 0, P2 = 1;
+
+// Initial hex: side 3 (radius 2 from center)
+const INITIAL_TILES = new Set();
+for (let r = 0; r < GRID_SIZE; r++)
+  for (let q = 0; q < GRID_SIZE; q++)
+    if (VALID_SET.has(qrToIdx(q, r)) && hexDist(q, r) <= 2)
+      INITIAL_TILES.add(qrToIdx(q, r));
+
+const CORNERS = [[5,1],[5,3],[3,5],[1,5],[1,3],[3,1]];
+const INIT_P1 = new Set([0,2,4].map(i => qrToIdx(...CORNERS[i])));
+const INIT_P2 = new Set([1,3,5].map(i => qrToIdx(...CORNERS[i])));
+
+class GameState {
+  constructor() {
+    this.tiles = new Set(INITIAL_TILES);
+    this.pieces = [new Set(INIT_P1), new Set(INIT_P2)];
+    this.current = P1;
+    this.ply = PLY_PIECE;
+    this.lastMovedTile = null;
+    this.winner = null;
+  }
+
+  clone() {
+    const s = new GameState();
+    s.tiles = new Set(this.tiles);
+    s.pieces = [new Set(this.pieces[0]), new Set(this.pieces[1])];
+    s.current = this.current;
+    s.ply = this.ply;
+    s.lastMovedTile = this.lastMovedTile;
+    s.winner = this.winner;
+    return s;
+  }
+
+  get occupied() {
+    const s = new Set(this.pieces[0]);
+    for (const p of this.pieces[1]) s.add(p);
+    return s;
+  }
+
+  checkWinner() {
+    for (let p = 0; p < 2; p++) {
+      const pcs = [...this.pieces[p]];
+      if (pcs.length !== 3) continue;
+      const [a, b, c] = pcs;
+      const na = new Set(NEIGHBORS[a] || []);
+      const nb = new Set(NEIGHBORS[b] || []);
+      if (na.has(b) && na.has(c) && nb.has(c)) return p;
+    }
+    return null;
+  }
+
+  edgeTiles() {
+    const edge = new Set();
+    for (const idx of this.tiles)
+      for (const nbr of (NEIGHBORS[idx] || []))
+        if (!this.tiles.has(nbr)) { edge.add(idx); break; }
+    return edge;
+  }
+
+  isConnectedWithout(tileIdx) {
+    const remaining = new Set(this.tiles);
+    remaining.delete(tileIdx);
+    if (remaining.size === 0) return false;
+    const start = remaining.values().next().value;
+    const visited = new Set([start]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const cur = queue.pop();
+      for (const nbr of (NEIGHBORS[cur] || []))
+        if (remaining.has(nbr) && !visited.has(nbr)) {
+          visited.add(nbr); queue.push(nbr);
+        }
+    }
+    return visited.size === remaining.size;
+  }
+
+  removableEdgeTiles() {
+    const occ = this.occupied;
+    const removable = new Set();
+    for (const idx of this.edgeTiles()) {
+      if (occ.has(idx)) continue;
+      if (idx === this.lastMovedTile) continue;
+      // Only allow removing tiles with ≤4 tile neighbors (truly on the edge)
+      // This prevents removing near-interior tiles (5+ neighbors) that would create holes
+      let tileNbrCount = 0;
+      for (const nbr of (NEIGHBORS[idx] || []))
+        if (this.tiles.has(nbr)) tileNbrCount++;
+      if (tileNbrCount > 4) continue;
+      if (this.isConnectedWithout(idx)) removable.add(idx);
+    }
+    return removable;
+  }
+
+  validPlacements(removed) {
+    const remaining = new Set(this.tiles);
+    remaining.delete(removed);
+    const candidates = new Set();
+    for (const idx of remaining)
+      for (const nbr of (NEIGHBORS[idx] || []))
+        if (!remaining.has(nbr)) candidates.add(nbr);
+    candidates.delete(removed);
+    // Per rules: tile must be placed adjacent to 2+ existing tiles
+    const valid = new Set();
+    for (const pos of candidates) {
+      let adjCount = 0;
+      for (const nbr of (NEIGHBORS[pos] || []))
+        if (remaining.has(nbr)) adjCount++;
+      if (adjCount < 2 || adjCount >= 5) continue;  // must touch 2-4 tiles
+
+      const newTiles = new Set(remaining);
+      newTiles.add(pos);
+      const start = newTiles.values().next().value;
+      const visited = new Set([start]);
+      const queue = [start];
+      while (queue.length > 0) {
+        const cur = queue.pop();
+        for (const nbr of (NEIGHBORS[cur] || []))
+          if (newTiles.has(nbr) && !visited.has(nbr)) {
+            visited.add(nbr); queue.push(nbr);
+          }
+      }
+      if (visited.size === newTiles.size) valid.add(pos);
+    }
+    return valid;
+  }
+
+  getPieceMoves() {
+    const moves = [];
+    const occ = this.occupied;
+    for (const piece of this.pieces[this.current]) {
+      for (let d = 0; d < 6; d++) {
+        const landing = slide(piece, d, this.tiles, occ);
+        if (landing !== null) moves.push([piece, d, landing]);
+      }
+    }
+    return moves;
+  }
+
+  getTileMoves() {
+    const moves = [];
+    const removable = this.removableEdgeTiles();
+    for (const src of removable)
+      for (const dst of this.validPlacements(src))
+        moves.push([src, dst]);
+    return moves;
+  }
+
+  getLegalMoves() {
+    if (this.winner !== null) return [];
+    return this.ply === PLY_PIECE ? this.getPieceMoves() : this.getTileMoves();
+  }
+
+  applyPieceMove(piece, dir, landing) {
+    const s = this.clone();
+    s.pieces[s.current].delete(piece);
+    s.pieces[s.current].add(landing);
+    s.ply = PLY_TILE;
+    const w = s.checkWinner();
+    if (w !== null) s.winner = w;
+    return s;
+  }
+
+  applyTileMove(src, dst) {
+    const s = this.clone();
+    if (!s.tiles.has(src)) console.error(`BUG: removing tile ${src} that doesn't exist!`);
+    if (s.tiles.has(dst)) console.error(`BUG: placing tile at ${dst} which already has a tile!`);
+    s.tiles.delete(src);
+    s.tiles.add(dst);
+    if (s.tiles.size !== this.tiles.size) console.error(`BUG: tile count ${this.tiles.size} → ${s.tiles.size}`);
+    s.lastMovedTile = dst;
+    s.current = 1 - s.current;
+    s.ply = PLY_PIECE;
+    const w = s.checkWinner();
+    if (w !== null) s.winner = w;
+    return s;
+  }
+
+  applyMove(move) {
+    if (this.ply === PLY_PIECE) return this.applyPieceMove(...move);
+    return this.applyTileMove(...move);
+  }
+
+  // --- NN encoding ---
+  encode() {
+    const board = new Float32Array(6 * 7 * 7);
+    const set = (ch, q, r, v) => { board[ch * 49 + r * 7 + q] = v; };
+    for (const idx of this.tiles) { const [q,r] = idxToQr(idx); set(0, q, r, 1); }
+    for (const idx of this.pieces[this.current]) { const [q,r] = idxToQr(idx); set(1, q, r, 1); }
+    const opp = 1 - this.current;
+    for (const idx of this.pieces[opp]) { const [q,r] = idxToQr(idx); set(2, q, r, 1); }
+    if (this.ply === PLY_PIECE)
+      for (const [q,r] of VALID_CELLS) set(3, q, r, 1);
+    if (this.lastMovedTile !== null) { const [q,r] = idxToQr(this.lastMovedTile); set(4, q, r, 1); }
+    if (this.ply === PLY_TILE)
+      for (const idx of this.removableEdgeTiles()) { const [q,r] = idxToQr(idx); set(5, q, r, 1); }
+    return board;
+  }
+}
+
+// ============================================================
+// MCTS (port of mcts.py)
+// ============================================================
+const PIECE_ACTION_SIZE = 49 * 6;  // 294
+const TILE_ACTION_SIZE = 49 * 49;  // 2401
+
+function pieceToAction(piece, dir) { return piece * 6 + dir; }
+function tileToAction(src, dst) { return src * 49 + dst; }
+
+class MCTSNode2 {
+  constructor(state, parent, action, prior) {
+    this.state = state;
+    this.parent = parent || null;
+    this.action = action || null;
+    this.children = [];
+    this.visits = 0;
+    this.valueSum = 0;
+    this.prior = prior || 0;
+    this.expanded = false;
+  }
+  get q() { return this.visits === 0 ? 0 : this.valueSum / this.visits; }
+}
+
+// ============================================================
+// Pure JS Neural Network Forward Pass
+// ============================================================
+// Tensors are { data: Float32Array, shape: number[] }
+// Stored as flat row-major arrays.
+
+function T(data, shape) { return { data, shape }; }
+
+function conv2d(input, weight, pad) {
+  // input: [Cin, H, W], weight: [Cout, Cin, kH, kW]
+  const [Cin, H, W] = input.shape;
+  const [Cout, , kH, kW] = weight.shape;
+  const oH = H + 2*pad - kH + 1, oW = W + 2*pad - kW + 1;
+  const out = new Float32Array(Cout * oH * oW);
+  const iD = input.data, wD = weight.data;
+  for (let co = 0; co < Cout; co++) {
+    for (let oh = 0; oh < oH; oh++) {
+      for (let ow = 0; ow < oW; ow++) {
+        let sum = 0;
+        for (let ci = 0; ci < Cin; ci++) {
+          for (let kh = 0; kh < kH; kh++) {
+            for (let kw = 0; kw < kW; kw++) {
+              const ih = oh - pad + kh, iw = ow - pad + kw;
+              if (ih >= 0 && ih < H && iw >= 0 && iw < W) {
+                sum += iD[(ci * H + ih) * W + iw] *
+                       wD[((co * Cin + ci) * kH + kh) * kW + kw];
+              }
+            }
+          }
+        }
+        out[(co * oH + oh) * oW + ow] = sum;
+      }
+    }
+  }
+  return T(out, [Cout, oH, oW]);
+}
+
+function batchNorm(input, weight, bias, mean, variance) {
+  // input: [C, H, W], all params: [C]
+  const [C, H, W] = input.shape;
+  const out = new Float32Array(input.data.length);
+  const eps = 1e-5;
+  for (let c = 0; c < C; c++) {
+    const scale = weight.data[c] / Math.sqrt(variance.data[c] + eps);
+    const shift = bias.data[c] - mean.data[c] * scale;
+    const off = c * H * W;
+    for (let i = 0; i < H * W; i++) {
+      out[off + i] = input.data[off + i] * scale + shift;
+    }
+  }
+  return T(out, input.shape);
+}
+
+function relu(input) {
+  const out = new Float32Array(input.data.length);
+  for (let i = 0; i < out.length; i++) out[i] = Math.max(0, input.data[i]);
+  return T(out, input.shape);
+}
+
+function addTensors(a, b) {
+  const out = new Float32Array(a.data.length);
+  for (let i = 0; i < out.length; i++) out[i] = a.data[i] + b.data[i];
+  return T(out, a.shape);
+}
+
+function linear(input, weight, bias) {
+  // input: flat [in], weight: [out, in], bias: [out]
+  const inSize = weight.shape[1], outSize = weight.shape[0];
+  const out = new Float32Array(outSize);
+  for (let o = 0; o < outSize; o++) {
+    let sum = bias.data[o];
+    const wOff = o * inSize;
+    for (let i = 0; i < inSize; i++) sum += weight.data[wOff + i] * input.data[i];
+    out[o] = sum;
+  }
+  return T(out, [outSize]);
+}
+
+class NonagaNN {
+  constructor(weights) { this.w = weights; }
+
+  predict(boardData) {
+    // boardData: Float32Array of length 6*7*7
+    let x = T(boardData, [6, 7, 7]);
+
+    // Input conv + BN + ReLU
+    x = conv2d(x, this.w['conv_in.weight'], 1);
+    x = batchNorm(x, this.w['bn_in.weight'], this.w['bn_in.bias'],
+                     this.w['bn_in.running_mean'], this.w['bn_in.running_var']);
+    x = relu(x);
+
+    // 4 ResBlocks
+    for (let i = 0; i < 4; i++) {
+      const p = `res_blocks.${i}`;
+      const residual = x;
+      let y = conv2d(x, this.w[`${p}.conv1.weight`], 1);
+      y = batchNorm(y, this.w[`${p}.bn1.weight`], this.w[`${p}.bn1.bias`],
+                       this.w[`${p}.bn1.running_mean`], this.w[`${p}.bn1.running_var`]);
+      y = relu(y);
+      y = conv2d(y, this.w[`${p}.conv2.weight`], 1);
+      y = batchNorm(y, this.w[`${p}.bn2.weight`], this.w[`${p}.bn2.bias`],
+                       this.w[`${p}.bn2.running_mean`], this.w[`${p}.bn2.running_var`]);
+      x = relu(addTensors(y, residual));
+    }
+
+    // Piece policy head
+    let pp = conv2d(x, this.w['piece_conv.weight'], 0);
+    pp = batchNorm(pp, this.w['piece_bn.weight'], this.w['piece_bn.bias'],
+                       this.w['piece_bn.running_mean'], this.w['piece_bn.running_var']);
+    pp = relu(pp);
+    pp = T(pp.data, [pp.data.length]); // flatten
+    pp = linear(pp, this.w['piece_fc.weight'], this.w['piece_fc.bias']);
+
+    // Tile policy head
+    let tp = conv2d(x, this.w['tile_conv.weight'], 0);
+    tp = batchNorm(tp, this.w['tile_bn.weight'], this.w['tile_bn.bias'],
+                       this.w['tile_bn.running_mean'], this.w['tile_bn.running_var']);
+    tp = relu(tp);
+    tp = T(tp.data, [tp.data.length]);
+    tp = linear(tp, this.w['tile_fc.weight'], this.w['tile_fc.bias']);
+
+    // Value head
+    let v = conv2d(x, this.w['val_conv.weight'], 0);
+    v = batchNorm(v, this.w['val_bn.weight'], this.w['val_bn.bias'],
+                     this.w['val_bn.running_mean'], this.w['val_bn.running_var']);
+    v = relu(v);
+    v = T(v.data, [v.data.length]);
+    v = linear(v, this.w['val_fc1.weight'], this.w['val_fc1.bias']);
+    v = relu(v);
+    v = linear(v, this.w['val_fc2.weight'], this.w['val_fc2.bias']);
+    const value = Math.tanh(v.data[0]);
+
+    return { pieceLogits: pp.data, tileLogits: tp.data, value };
+  }
+}
+
+// ============================================================
+// MCTS
+// ============================================================
+class MCTS2 {
+  constructor(nn, sims, cpuct) {
+    this.nn = nn; // NonagaNN instance or null
+    this.sims = sims || 50;
+    this.cpuct = cpuct || 1.5;
+  }
+
+  search(state) {
+    const root = new MCTSNode2(state, null, null, 0);
+    this.expand(root);
+
+    // Dirichlet noise at root
+    if (root.children.length > 0) {
+      const noise = dirichlet(root.children.length, 0.3);
+      const eps = 0.25;
+      root.children.forEach((c, i) => {
+        c.prior = (1 - eps) * c.prior + eps * noise[i];
+      });
+    }
+
+    for (let i = 0; i < this.sims; i++) {
+      let node = root;
+      while (node.expanded && node.children.length > 0)
+        node = this.selectChild(node);
+      let value;
+      if (node.state.winner !== null) {
+        value = node.state.winner === node.state.current ? 1 : -1;
+      } else {
+        value = this.expand(node);
+      }
+      this.backup(node, value);
+    }
+    return this.getPolicy(root, state);
+  }
+
+  selectChild(node) {
+    let best = null, bestScore = -Infinity;
+    const sqrtN = Math.sqrt(node.visits);
+    for (const child of node.children) {
+      const q = -child.q;
+      const u = this.cpuct * child.prior * sqrtN / (1 + child.visits);
+      const score = q + u;
+      if (score > bestScore) { bestScore = score; best = child; }
+    }
+    return best;
+  }
+
+  expand(node) {
+    const state = node.state;
+    const moves = state.getLegalMoves();
+    if (moves.length === 0) { node.expanded = true; return 0; }
+
+    let pieceProbs, tileProbs, value;
+    if (this.nn) {
+      const board = state.encode();
+      const result = this.nn.predict(board);
+      pieceProbs = softmax(result.pieceLogits);
+      tileProbs = softmax(result.tileLogits);
+      value = result.value;
+    } else {
+      pieceProbs = new Float32Array(PIECE_ACTION_SIZE).fill(1/PIECE_ACTION_SIZE);
+      tileProbs = new Float32Array(TILE_ACTION_SIZE).fill(1/TILE_ACTION_SIZE);
+      value = 0;
+    }
+
+    const isPiece = state.ply === PLY_PIECE;
+    const policy = isPiece ? pieceProbs : tileProbs;
+    const actionFn = isPiece
+      ? m => pieceToAction(m[0], m[1])
+      : m => tileToAction(m[0], m[1]);
+
+    // Mask and normalize
+    let total = 0;
+    const priors = moves.map(m => { const p = policy[actionFn(m)]; total += p; return p; });
+    if (total > 0) priors.forEach((_, i) => priors[i] /= total);
+    else priors.fill(1 / moves.length);
+
+    for (let i = 0; i < moves.length; i++) {
+      const child = new MCTSNode2(state.applyMove(moves[i]), node, moves[i], priors[i]);
+      node.children.push(child);
+    }
+    node.expanded = true;
+    return value;
+  }
+
+  backup(node, value) {
+    let cur = node;
+    while (cur) {
+      cur.visits++;
+      cur.valueSum += value;
+      value = -value;
+      cur = cur.parent;
+    }
+  }
+
+  getPolicy(root, state) {
+    const isPiece = state.ply === PLY_PIECE;
+    const size = isPiece ? PIECE_ACTION_SIZE : TILE_ACTION_SIZE;
+    const actionFn = isPiece
+      ? m => pieceToAction(m[0], m[1])
+      : m => tileToAction(m[0], m[1]);
+    const policy = new Float32Array(size);
+    let total = 0;
+    for (const child of root.children) {
+      const a = actionFn(child.action);
+      policy[a] = child.visits;
+      total += child.visits;
+    }
+    if (total > 0) for (let i = 0; i < size; i++) policy[i] /= total;
+    return policy;
+  }
+
+  bestMove(state) {
+    const policy = this.search(state);
+    let bestIdx = 0;
+    for (let i = 1; i < policy.length; i++)
+      if (policy[i] > policy[bestIdx]) bestIdx = i;
+    const moves = state.getLegalMoves();
+    const isPiece = state.ply === PLY_PIECE;
+    const actionFn = isPiece
+      ? m => pieceToAction(m[0], m[1])
+      : m => tileToAction(m[0], m[1]);
+    for (const m of moves)
+      if (actionFn(m) === bestIdx) return m;
+    return moves[0];
+  }
+}
+
+function softmax(arr) {
+  const max = Math.max(...arr);
+  const exp = arr.map(x => Math.exp(x - max));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  return exp.map(x => x / sum);
+}
+
+function dirichlet(n, alpha) {
+  // Approximate Dirichlet using gamma distribution
+  const samples = [];
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    // Gamma(alpha, 1) approximation using Marsaglia's method for alpha < 1
+    let x;
+    if (alpha >= 1) {
+      // Simple gamma for alpha >= 1
+      const d = alpha - 1/3, c = 1/Math.sqrt(9*d);
+      while (true) {
+        let z, v;
+        do { z = randn(); v = 1 + c * z; } while (v <= 0);
+        v = v * v * v;
+        const u = Math.random();
+        if (u < 1 - 0.0331 * z * z * z * z) { x = d * v; break; }
+        if (Math.log(u) < 0.5 * z * z + d * (1 - v + Math.log(v))) { x = d * v; break; }
+      }
+    } else {
+      // Gamma(alpha+1) * U^(1/alpha)
+      const d = alpha + 1 - 1/3, c = 1/Math.sqrt(9*d);
+      while (true) {
+        let z, v;
+        do { z = randn(); v = 1 + c * z; } while (v <= 0);
+        v = v * v * v;
+        const u = Math.random();
+        if (u < 1 - 0.0331 * z * z * z * z) { x = d * v * Math.pow(Math.random(), 1/alpha); break; }
+        if (Math.log(u) < 0.5 * z * z + d * (1 - v + Math.log(v))) { x = d * v * Math.pow(Math.random(), 1/alpha); break; }
+      }
+    }
+    samples.push(x);
+    sum += x;
+  }
+  return samples.map(x => x / sum);
+}
+
+function randn() {
+  let u, v, s;
+  do { u = Math.random() * 2 - 1; v = Math.random() * 2 - 1; s = u*u + v*v; } while (s >= 1 || s === 0);
+  return u * Math.sqrt(-2 * Math.log(s) / s);
+}
+
+// ============================================================
+// Rendering
+// ============================================================
+const SVG_NS = "http://www.w3.org/2000/svg";
+const HEX_SIZE = 38;
+const BOARD_CX = 300, BOARD_CY = 300;
+
+function hexToPixel(q, r) {
+  // Axial to pixel (pointy-top hex)
+  const x = HEX_SIZE * (Math.sqrt(3) * (q - 3) + Math.sqrt(3)/2 * (r - 3));
+  const y = HEX_SIZE * (3/2 * (r - 3));
+  return [BOARD_CX + x, BOARD_CY + y];
+}
+
+function hexPoints(cx, cy, size) {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    pts.push(`${cx + size * Math.cos(angle)},${cy + size * Math.sin(angle)}`);
+  }
+  return pts.join(' ');
+}
+
+// ============================================================
+// UI State
+// ============================================================
+let gameState = new GameState();
+let history = [];
+let selectedPiece = null;
+let selectedTileSrc = null;
+let aiEnabled = false;
+let aiPlayer = P2;
+let aiThinking = false;
+let nnModel = null;  // NonagaNN instance
+let mcts = null;
+let showCoords = false;
+
+// Last-move tracking
+let lastMoveFrom = null;
+let lastMoveTo = null;
+
+// Ghost tile: shows where a tile was removed, fades out
+let ghostTileIdx = null;
+let ghostTileTimer = null;
+
+// Drag state
+let dragPiece = null;     // idx of piece being dragged (or null)
+let dragMoves = [];       // available moves for dragged piece
+
+const svg = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const undoBtn = document.getElementById('btn-undo');
+const aiBtn = document.getElementById('btn-ai');
+const dragGhost = document.getElementById('drag-ghost');
+
+// Preserve <defs> when clearing SVG
+const svgDefs = svg.querySelector('defs');
+
+function render() {
+  // Clear everything except <defs>
+  while (svg.lastChild && svg.lastChild !== svgDefs) svg.removeChild(svg.lastChild);
+  if (!svg.contains(svgDefs)) svg.appendChild(svgDefs);
+
+  const state = gameState;
+
+  // Determine UI mode
+  const isTerminal = state.winner !== null;
+  const isPiecePly = state.ply === PLY_PIECE;
+  const isTilePly = state.ply === PLY_TILE;
+
+  // Get valid placements if we're in tile-move with a selected source
+  let placements = new Set();
+  if (isTilePly && selectedTileSrc !== null) {
+    placements = state.validPlacements(selectedTileSrc);
+  }
+
+  // Get removable tiles
+  let removable = new Set();
+  if (isTilePly && !isTerminal && !aiThinking) {
+    removable = state.removableEdgeTiles();
+  }
+
+  // Draw placement candidates (ghost hexes)
+  for (const idx of placements) {
+    const [q, r] = idxToQr(idx);
+    const [px, py] = hexToPixel(q, r);
+    const hex = document.createElementNS(SVG_NS, 'polygon');
+    hex.setAttribute('points', hexPoints(px, py, HEX_SIZE - 2));
+    hex.setAttribute('class', 'tile placement');
+    hex.addEventListener('click', () => onPlacementClick(idx));
+    svg.appendChild(hex);
+  }
+
+  // Draw tiles
+  for (const idx of state.tiles) {
+    const [q, r] = idxToQr(idx);
+    const [px, py] = hexToPixel(q, r);
+    const hex = document.createElementNS(SVG_NS, 'polygon');
+    hex.setAttribute('points', hexPoints(px, py, HEX_SIZE - 2));
+    let cls = 'tile';
+    if (removable.has(idx)) cls += ' removable';
+    if (idx === selectedTileSrc) cls += ' selected-tile';
+    if (idx === lastMoveTo) cls += ' last-move';
+    hex.setAttribute('class', cls);
+
+    if (isTilePly && !isTerminal && !aiThinking && removable.has(idx)) {
+      hex.addEventListener('click', (e) => { e.stopPropagation(); onTileClick(idx); });
+    }
+    svg.appendChild(hex);
+  }
+
+  // Draw ghost tile (fading outline where a piece/tile was)
+  if (ghostTileIdx !== null) {
+    const [gq, gr] = idxToQr(ghostTileIdx);
+    const [gpx, gpy] = hexToPixel(gq, gr);
+    const ghostHex = document.createElementNS(SVG_NS, 'polygon');
+    ghostHex.setAttribute('points', hexPoints(gpx, gpy, HEX_SIZE - 2));
+    ghostHex.setAttribute('class', 'tile-ghost');
+    svg.appendChild(ghostHex);
+  }
+
+  // Draw pieces and move dots
+  const pieceMoves = isPiecePly && !isTerminal ? state.getPieceMoves() : [];
+  const activePiece = selectedPiece !== null ? selectedPiece : dragPiece;
+
+  // If a piece is selected or being dragged, show slide paths and landing dots
+  if (activePiece !== null) {
+    const landings = pieceMoves.filter(m => m[0] === activePiece);
+    const [sq, sr] = idxToQr(activePiece);
+    const [spx, spy] = hexToPixel(sq, sr);
+    let dotIndex = 0;
+    for (const [_, d, landing] of landings) {
+      const [q, r] = idxToQr(landing);
+      const [px, py] = hexToPixel(q, r);
+      // Draw slide path line
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', spx); line.setAttribute('y1', spy);
+      line.setAttribute('x2', px); line.setAttribute('y2', py);
+      line.setAttribute('stroke', 'var(--gold)'); line.setAttribute('stroke-width', 2);
+      line.setAttribute('stroke-dasharray', '4 4'); line.setAttribute('opacity', 0.3);
+      svg.appendChild(line);
+      // Draw landing dot with pulsing animation
+      const dot = document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('cx', px);
+      dot.setAttribute('cy', py);
+      dot.setAttribute('r', 10);
+      dot.setAttribute('class', 'move-dot');
+      dot.setAttribute('data-landing-dir', d);
+      dot.setAttribute('data-landing-idx', landing);
+      // Pulsing animation with staggered delay
+      dot.style.animation = `pulse-dot 1.4s ease-in-out infinite`;
+      dot.style.animationDelay = `${dotIndex * 0.15}s`;
+      dot.style.transformOrigin = `${px}px ${py}px`;
+      dot.addEventListener('click', () => onLandingClick(activePiece, d, landing));
+      svg.appendChild(dot);
+      dotIndex++;
+    }
+  }
+
+  // Draw pieces
+  for (let p = 0; p < 2; p++) {
+    for (const idx of state.pieces[p]) {
+      const [q, r] = idxToQr(idx);
+      const [px, py] = hexToPixel(q, r);
+      const circle = document.createElementNS(SVG_NS, 'circle');
+      circle.setAttribute('cx', px);
+      circle.setAttribute('cy', py);
+      circle.setAttribute('r', 18);
+      let cls = `piece p${p+1}`;
+      if (idx === selectedPiece) cls += ' selected';
+      if (idx === dragPiece) cls += ' ghost-src';
+      circle.setAttribute('class', cls);
+
+      if (isPiecePly && !isTerminal && !aiThinking && p === state.current) {
+        circle.addEventListener('click', (e) => { e.stopPropagation(); onPieceClick(idx); });
+        circle.style.cursor = 'grab';
+      }
+      svg.appendChild(circle);
+    }
+  }
+
+  // Debug: draw coordinate labels on tiles
+  if (showCoords) {
+    for (const idx of state.tiles) {
+      const [q, r] = idxToQr(idx);
+      const [px, py] = hexToPixel(q, r);
+      const txt = document.createElementNS(SVG_NS, 'text');
+      txt.setAttribute('x', px);
+      txt.setAttribute('y', py + 4);
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('font-size', '10');
+      txt.setAttribute('fill', '#666');
+      txt.setAttribute('pointer-events', 'none');
+      txt.textContent = `${q},${r}`;
+      svg.appendChild(txt);
+    }
+  }
+
+  updateStatus();
+}
+
+function toggleCoords() {
+  showCoords = !showCoords;
+  render();
+}
+
+function updateStatus() {
+  const state = gameState;
+  const ind = document.getElementById('turn-indicator');
+
+  if (state.winner !== null) {
+    const color = state.winner === P1 ? 'var(--p1)' : 'var(--p2)';
+    const name = state.winner === P1 ? 'Player 1' : 'Player 2';
+    ind.style.background = color;
+    statusEl.innerHTML = `<span id="turn-indicator" style="background:${color}"></span><span style="font-size:1.3rem;font-weight:bold;color:${color}">${name} wins!</span>`;
+    // Draw highlight on winning triangle
+    const winPieces = [...state.pieces[state.winner]];
+    for (const idx of winPieces) {
+      const [q, r] = idxToQr(idx);
+      const [px, py] = hexToPixel(q, r);
+      const ring = document.createElementNS(SVG_NS, 'circle');
+      ring.setAttribute('cx', px);
+      ring.setAttribute('cy', py);
+      ring.setAttribute('r', 24);
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', 'var(--gold)');
+      ring.setAttribute('stroke-width', 3);
+      ring.innerHTML = `<animate attributeName="r" values="22;28;22" dur="1s" repeatCount="indefinite"/>`;
+      svg.appendChild(ring);
+    }
+    return;
+  }
+
+  if (aiThinking) {
+    const color = state.current === P1 ? 'var(--p1)' : 'var(--p2)';
+    statusEl.innerHTML = `<span id="turn-indicator" style="background:${color}"></span><span class="spinner"></span>AI thinking...`;
+    return;
+  }
+
+  const color = state.current === P1 ? 'var(--p1)' : 'var(--p2)';
+  const playerName = `Player ${state.current + 1}`;
+  const action = state.ply === PLY_PIECE ? 'move a piece' : 'relocate a tile';
+  ind.style.background = color;
+  statusEl.innerHTML = `<span id="turn-indicator" style="background:${color}"></span>${playerName}'s turn — ${action}`;
+
+  if (state.ply === PLY_TILE && selectedTileSrc !== null) {
+    statusEl.innerHTML += ' (select destination)';
+  }
+}
+
+// ============================================================
+// Event Handlers
+// ============================================================
+function onPieceClick(idx) {
+  if (dragPiece !== null) return; // ignore clicks during drag
+  if (gameState.ply !== PLY_PIECE || gameState.winner !== null) return;
+  if (!gameState.pieces[gameState.current].has(idx)) return;
+  selectedPiece = (selectedPiece === idx) ? null : idx;
+  selectedTileSrc = null;
+  render();
+}
+
+function onLandingClick(piece, dir, landing) {
+  showGhostTile(piece);
+  lastMoveFrom = piece;
+  lastMoveTo = landing;
+  history.push(gameState);
+  gameState = gameState.applyPieceMove(piece, dir, landing);
+  selectedPiece = null;
+  selectedTileSrc = null;
+  dragPiece = null;
+  undoBtn.disabled = false;
+  render();
+
+  // If won after piece move, stop
+  if (gameState.winner !== null) return;
+
+  // Auto-trigger AI for tile move if it's AI's turn
+  if (aiEnabled && gameState.current === aiPlayer) {
+    setTimeout(() => aiMove(), 500);
+  }
+}
+
+function showGhostTile(idx) {
+  if (ghostTileTimer) clearTimeout(ghostTileTimer);
+  ghostTileIdx = idx;
+  ghostTileTimer = setTimeout(() => {
+    ghostTileIdx = null;
+    ghostTileTimer = null;
+    render();
+  }, 2500);
+}
+
+function onTileClick(idx) {
+  if (gameState.ply !== PLY_TILE || gameState.winner !== null) return;
+  if (selectedTileSrc === idx) {
+    selectedTileSrc = null;
+  } else {
+    selectedTileSrc = idx;
+  }
+  render();
+}
+
+function onPlacementClick(idx) {
+  if (selectedTileSrc === null) return;
+  showGhostTile(selectedTileSrc);
+  lastMoveFrom = selectedTileSrc;
+  lastMoveTo = idx;
+  history.push(gameState);
+  gameState = gameState.applyTileMove(selectedTileSrc, idx);
+  selectedPiece = null;
+  selectedTileSrc = null;
+  undoBtn.disabled = false;
+  render();
+
+  // Check if AI should play next
+  if (gameState.winner === null && aiEnabled && gameState.current === aiPlayer) {
+    setTimeout(() => aiMove(), 500);
+  }
+}
+
+// ============================================================
+// Drag-and-Drop (Piece Moves)
+// ============================================================
+function startDrag(idx, clientX, clientY) {
+  if (gameState.ply !== PLY_PIECE || gameState.winner !== null || aiThinking) return;
+  if (!gameState.pieces[gameState.current].has(idx)) return;
+
+  dragPiece = idx;
+  selectedPiece = null;
+  const pMoves = gameState.getPieceMoves();
+  dragMoves = pMoves.filter(m => m[0] === idx);
+
+  // Style and show ghost
+  const isP1 = gameState.current === P1;
+  dragGhost.style.background = isP1
+    ? 'radial-gradient(circle at 38% 32%, #ff8a9e, #e94560 50%, #9b1b30)'
+    : 'radial-gradient(circle at 38% 32%, #7ee8e0, #4ecdc4 50%, #1a7a70)';
+  dragGhost.style.border = isP1 ? '2px solid #8b1a2e' : '2px solid #1a6b62';
+  dragGhost.style.display = 'block';
+  dragGhost.style.left = clientX + 'px';
+  dragGhost.style.top = clientY + 'px';
+
+  render();
+}
+
+function moveDrag(clientX, clientY) {
+  if (dragPiece === null) return;
+  dragGhost.style.left = clientX + 'px';
+  dragGhost.style.top = clientY + 'px';
+}
+
+function endDrag(clientX, clientY) {
+  if (dragPiece === null) return;
+
+  dragGhost.style.display = 'none';
+
+  // Find drop target using elementFromPoint
+  const el = document.elementFromPoint(clientX, clientY);
+  if (el) {
+    const landingDir = el.getAttribute('data-landing-dir');
+    const landingIdx = el.getAttribute('data-landing-idx');
+    if (landingDir !== null && landingIdx !== null) {
+      const dir = parseInt(landingDir);
+      const landing = parseInt(landingIdx);
+      const piece = dragPiece;
+      dragPiece = null;
+      dragMoves = [];
+      onLandingClick(piece, dir, landing);
+      return;
+    }
+  }
+
+  // Drop missed — fall back to click-select mode
+  const piece = dragPiece;
+  dragPiece = null;
+  dragMoves = [];
+  selectedPiece = piece;
+  render();
+}
+
+// Mouse events
+document.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  const target = e.target.closest('.piece');
+  if (!target) return;
+  // Only current player's pieces in piece ply
+  if (gameState.ply !== PLY_PIECE || gameState.winner !== null || aiThinking) return;
+  // Determine which piece was clicked by position
+  const cx = parseFloat(target.getAttribute('cx'));
+  const cy = parseFloat(target.getAttribute('cy'));
+  // Find the piece idx matching this position
+  for (const idx of gameState.pieces[gameState.current]) {
+    const [q, r] = idxToQr(idx);
+    const [px, py] = hexToPixel(q, r);
+    if (Math.abs(px - cx) < 1 && Math.abs(py - cy) < 1) {
+      e.preventDefault();
+      startDrag(idx, e.clientX, e.clientY);
+      return;
+    }
+  }
+});
+
+document.addEventListener('mousemove', (e) => {
+  moveDrag(e.clientX, e.clientY);
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (dragPiece !== null) {
+    endDrag(e.clientX, e.clientY);
+  }
+});
+
+// Touch events
+document.addEventListener('touchstart', (e) => {
+  const touch = e.touches[0];
+  const target = document.elementFromPoint(touch.clientX, touch.clientY);
+  if (!target) return;
+  const piece = target.closest('.piece');
+  if (!piece) return;
+  if (gameState.ply !== PLY_PIECE || gameState.winner !== null || aiThinking) return;
+  const cx = parseFloat(piece.getAttribute('cx'));
+  const cy = parseFloat(piece.getAttribute('cy'));
+  for (const idx of gameState.pieces[gameState.current]) {
+    const [q, r] = idxToQr(idx);
+    const [px, py] = hexToPixel(q, r);
+    if (Math.abs(px - cx) < 1 && Math.abs(py - cy) < 1) {
+      e.preventDefault();
+      startDrag(idx, touch.clientX, touch.clientY);
+      return;
+    }
+  }
+}, { passive: false });
+
+document.addEventListener('touchmove', (e) => {
+  if (dragPiece === null) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  moveDrag(touch.clientX, touch.clientY);
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+  if (dragPiece === null) return;
+  const touch = e.changedTouches[0];
+  endDrag(touch.clientX, touch.clientY);
+});
+
+// ============================================================
+// Controls
+// ============================================================
+function newGame() {
+  gameState = new GameState();
+  history = [];
+  selectedPiece = null;
+  selectedTileSrc = null;
+  dragPiece = null;
+  dragMoves = [];
+  lastMoveFrom = null;
+  lastMoveTo = null;
+  if (ghostTileTimer) clearTimeout(ghostTileTimer);
+  ghostTileIdx = null;
+  undoBtn.disabled = true;
+  render();
+
+  if (aiEnabled && gameState.current === aiPlayer) {
+    setTimeout(() => aiMove(), 500);
+  }
+}
+
+function undo() {
+  if (history.length === 0) return;
+  // Undo back to the last state where it was the human's piece-move turn
+  while (history.length > 0) {
+    gameState = history.pop();
+    if (gameState.ply === PLY_PIECE && gameState.current !== aiPlayer) break;
+    if (!aiEnabled) break;
+  }
+  selectedPiece = null;
+  selectedTileSrc = null;
+  dragPiece = null;
+  dragMoves = [];
+  lastMoveFrom = null;
+  lastMoveTo = null;
+  if (ghostTileTimer) clearTimeout(ghostTileTimer);
+  ghostTileIdx = null;
+  undoBtn.disabled = history.length === 0;
+  render();
+}
+
+function toggleAI() {
+  aiEnabled = !aiEnabled;
+  aiBtn.textContent = aiEnabled ? 'AI: On' : 'AI: Off';
+  if (aiEnabled && gameState.current === aiPlayer && gameState.winner === null) {
+    setTimeout(() => aiMove(), 500);
+  }
+}
+
+function aiMove() {
+  if (gameState.winner !== null) return;
+  if (aiThinking) return;
+  aiThinking = true;
+  document.getElementById('info').textContent = 'AI thinking...';
+  render();
+
+  setTimeout(() => {
+    try {
+      if (!mcts) mcts = new MCTS2(nnModel, nnModel ? 30 : 15, 1.5);
+
+      // Step 1: Piece move
+      if (gameState.ply === PLY_PIECE) {
+        const move = mcts.bestMove(gameState);
+        const [pq,pr] = idxToQr(move[0]);
+        const [lq,lr] = idxToQr(move[2]);
+        console.log(`AI piece: (${pq},${pr}) → (${lq},${lr})`);
+        showGhostTile(move[0]);
+        lastMoveFrom = move[0];
+        lastMoveTo = move[2];
+        history.push(gameState);
+        gameState = gameState.applyPieceMove(...move);
+        undoBtn.disabled = false;
+
+        if (gameState.winner !== null) {
+          aiThinking = false;
+          document.getElementById('info').textContent = '';
+          render();
+          return;
+        }
+
+        // Show piece move, then do tile move after a delay
+        document.getElementById('info').textContent = 'AI moving tile...';
+        render();
+
+        setTimeout(() => {
+          try {
+            aiDoTileMove();
+          } catch (e) {
+            console.error('AI tile error:', e);
+            aiThinking = false;
+            render();
+          }
+        }, 1200);
+        return;
+      }
+
+      // If already in tile ply (shouldn't normally happen)
+      aiDoTileMove();
+    } catch (e) {
+      console.error('AI error:', e);
+      document.getElementById('info').textContent = 'AI error: ' + e.message;
+      aiThinking = false;
+      render();
+    }
+  }, 400);
+}
+
+function aiDoTileMove() {
+  if (gameState.ply !== PLY_TILE) {
+    aiThinking = false;
+    render();
+    return;
+  }
+
+  const tileMoves = gameState.getTileMoves();
+  if (tileMoves.length === 0) {
+    gameState = gameState.clone();
+    gameState.current = 1 - gameState.current;
+    gameState.ply = PLY_PIECE;
+  } else {
+    const move = mcts.bestMove(gameState);
+    const [sq,sr] = idxToQr(move[0]);
+    const [dq,dr] = idxToQr(move[1]);
+    console.log(`AI tile: remove (${sq},${sr}) → place (${dq},${dr})`);
+    showGhostTile(move[0]);
+    lastMoveFrom = move[0];
+    lastMoveTo = move[1];
+    history.push(gameState);
+    gameState = gameState.applyTileMove(...move);
+  }
+  undoBtn.disabled = false;
+  aiThinking = false;
+  selectedPiece = null;
+  selectedTileSrc = null;
+  document.getElementById('info').textContent = '';
+  render();
+}
+
+// ============================================================
+// Weight Loading (binary + manifest)
+// ============================================================
+async function loadModel() {
+  try {
+    const [manifestResp, binResp] = await Promise.all([
+      fetch('./manifest.json'),
+      fetch('./weights.bin'),
+    ]);
+    if (!manifestResp.ok || !binResp.ok) throw new Error('Files not found');
+
+    const manifest = await manifestResp.json();
+    const buffer = await binResp.arrayBuffer();
+    const allFloats = new Float32Array(buffer);
+
+    // Reconstruct weight tensors
+    const weights = {};
+    for (const [name, info] of Object.entries(manifest)) {
+      const data = allFloats.slice(info.offset, info.offset + info.length);
+      weights[name] = T(data, info.shape);
+    }
+
+    nnModel = new NonagaNN(weights);
+    mcts = new MCTS2(nnModel, 30, 1.5);
+
+    // Quick sanity check: run one forward pass
+    const testBoard = new Float32Array(6 * 7 * 7);
+    nnModel.predict(testBoard);
+
+    console.log('Model loaded:', Object.keys(manifest).length, 'tensors');
+    document.getElementById('info').textContent = 'AI model loaded — AI plays as Player 2';
+
+    // Enable AI by default
+    aiEnabled = true;
+    aiBtn.textContent = 'AI: On';
+  } catch (e) {
+    console.log('No model found, using random AI:', e.message);
+    document.getElementById('info').textContent = 'No AI model — using random play (train a model first)';
+    mcts = new MCTS2(null, 15, 1.5);
+    aiEnabled = true;
+    aiBtn.textContent = 'AI: On';
+  }
+}
+
+// ============================================================
+// Init
+// ============================================================
+render();
+loadModel();
+</script>
+</body>
+</html>
