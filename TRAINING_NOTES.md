@@ -79,6 +79,17 @@ The only option is to start fresh with correct settings.
   value head gets signal from day 1. Lower sims keeps play weak enough to produce wins
   in early iterations. Can increase sims later once model is strong.
 
+## Memory Constraints (16GB Mac)
+
+Parallel self-play with 8 workers is memory-intensive: each worker holds a full copy of the neural network plus its own MCTS tree. On a 16GB Mac, this left little headroom for the training phase.
+
+Config adjustments made to stay within RAM:
+- **Replay buffer**: 5 → 3 iterations (each iteration produces ~60K augmented examples)
+- **Training epochs**: 5 → 2 per iteration (fewer passes over the buffer)
+- **Batch size**: 64 → 128 (fewer batches = less overhead, faster epochs)
+
+The replay buffer reduction is the most impactful — 5 iterations × ~60K examples × the tensor sizes was pushing memory limits when combined with the parallel workers. Shrinking to 3 keeps the training data diverse enough while fitting in RAM.
+
 ## Key Lessons
 1. **max_game_plies must exceed median game length** — Nonaga random games take ~171 plies median, 621 at 90th percentile.
 2. **Temperature must not drop to zero** if the game can cycle. MCTS with temp=0 produces deterministic defensive loops that never terminate.
