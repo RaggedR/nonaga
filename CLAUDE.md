@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Nonaga board game with AlphaZero-trained AI. Python for the game engine + training pipeline, single-file HTML for browser play. The AI uses MCTS with neural network priors (not minimax) because Nonaga's compound turns create a branching factor of ~300.
+Nonaga board game with an AlphaZero-style training pipeline, but the AI currently plays no better than random. Too many self-play games end in draws, starving the value head of learning signal. Python for the game engine + training pipeline, single-file HTML for browser play. The AI uses MCTS with neural network priors (not minimax) because Nonaga's compound turns create a branching factor of ~300.
 
 ## Commands
 

@@ -1,6 +1,6 @@
 # Nonaga
 
-A browser-playable implementation of Nonaga with an AlphaZero-style AI opponent.
+A browser-playable implementation of Nonaga. The goal is to train an AlphaZero-style AI opponent, but the AI currently plays no better than random — too many self-play games end in draws, starving the value head of learning signal.
 
 **[Play it now](https://raggedr.github.io/nonaga/)** | [Rules (PDF)](https://www.steffen-spiele.de/fileadmin/media/Spiele/Nonaga/Nonaga_EN.pdf)
 
@@ -26,18 +26,18 @@ Each turn is decomposed into two plies in the game tree:
 
 ## Training status
 
-The AI is partially trained and plays at a basic level. Training is ongoing.
+**The AI currently plays no better than random.** Training with AlphaZero-style self-play has not yet produced a competent player.
 
-### Why training is slow
+### The draw problem
 
-Nonaga is a surprisingly difficult game for AlphaZero-style training:
+The core issue is that too many self-play games end in draws, which means the value head gets no useful learning signal:
 
-- **Branching factor of ~300** per compound turn means MCTS needs many simulations to explore meaningfully
-- **Games can cycle indefinitely** — unlike chess or Go, there's no natural game-ending mechanism. Pieces slide and tiles shift, but neither side is forced toward a conclusion. This required careful tuning of ply limits (500) and temperature schedules to ensure games actually produce wins during self-play
-- **Degenerate equilibrium trap** — our first 50-iteration training run produced a model that learned to *avoid* forming triangles entirely. Once the model got defensive enough that games exceeded the ply limit, all outcomes became draws, value targets became zeros, and the policy reinforced triangle-avoidance in a vicious cycle. We had to restart from scratch with weaker initial play (fewer MCTS sims) to ensure wins occur early and the value head gets learning signal
-- **Each iteration takes ~1-2 hours** on Apple Silicon (MPS): 50 self-play games with 25 MCTS simulations each, D6 symmetry augmentation (12x data), neural network training, then arena evaluation
+- **Games can cycle indefinitely** — unlike chess or Go, there's no natural game-ending mechanism. Pieces slide and tiles shift, but neither side is forced toward a conclusion
+- **Degenerate equilibrium trap** — the model learns to *avoid* forming triangles entirely. Once defensive enough that games exceed the ply limit, all outcomes become draws, value targets become zeros, and the policy reinforces triangle-avoidance in a vicious cycle
+- **Branching factor of ~300** per compound turn means MCTS needs many simulations to explore meaningfully, and even then most games don't reach decisive positions
+- **Each iteration takes ~1-2 hours** on Apple Silicon (MPS), making experimentation slow
 
-The current browser model is from an earlier training run (iteration 49). A fresh training run with corrected hyperparameters is in progress — see `TRAINING_NOTES.md` for the full history of what went wrong and what we learned.
+See `TRAINING_NOTES.md` for the full history of what we've tried.
 
 ### Train it yourself
 
