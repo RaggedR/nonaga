@@ -46,10 +46,75 @@ class Coach:
         print(f"Using device: {self.device}")
 
     def train(self):
-        """Run the full training loop."""
+        """Run the full training loop with optional curriculum pretraining."""
         os.makedirs(self.config.checkpoint_dir, exist_ok=True)
+
+        # Phase 1: Curriculum pretraining (adjacency wins)
+        if self.config.curriculum_pretrain_iters > 0 and self.iteration == 0:
+            self._run_curriculum_phase()
+
+        # Phase 2: Full AlphaZero training (triangle wins, draw shaping)
+        self._run_full_training()
+
+    def _run_curriculum_phase(self):
+        """Phase 1: Pretrain with simpler win condition (2-adjacent = win)."""
+        n_iters = self.config.curriculum_pretrain_iters
+        win_mode = self.config.curriculum_win_mode
+        print(f"\n{'='*60}")
+        print(f"PHASE 1: Curriculum pretraining ({win_mode} wins, {n_iters} iters)")
+        print(f"{'='*60}")
+
+        # Temporarily swap config for curriculum
+        saved_sims = self.config.num_mcts_sims
+        saved_games = self.config.num_self_play_games
+        self.config.num_mcts_sims = self.config.curriculum_num_mcts_sims
+        self.config.num_self_play_games = self.config.curriculum_num_games
+
+        curriculum_buffer = deque(maxlen=self.config.replay_buffer_size)
+
+        for i in range(n_iters):
+            print(f"\n--- Curriculum iter {i+1}/{n_iters} ---")
+
+            # Self-play with curriculum win mode
+            temp_ckpt = os.path.join(self.config.checkpoint_dir, "_temp_selfplay.pt")
+            torch.save({'model_state_dict': self.network.state_dict()}, temp_ckpt)
+            examples, stats = generate_self_play_data_parallel(
+                temp_ckpt, self.config, win_mode=win_mode)
+            os.remove(temp_ckpt)
+            print(f"  {stats['num_examples']} examples "
+                  f"(P1={stats['wins_p1']} P2={stats['wins_p2']} D={stats['draws']} "
+                  f"avg_plies={stats['avg_plies']:.1f})")
+
+            # Augment and train
+            augmented = self._augment(examples)
+            curriculum_buffer.append(augmented)
+            all_data = []
+            for buf in curriculum_buffer:
+                all_data.extend(buf)
+            random.shuffle(all_data)
+            loss_info = self._train_network(all_data)
+            print(f"  Loss: total={loss_info['total']:.4f} "
+                  f"piece={loss_info['piece']:.4f} "
+                  f"tile={loss_info['tile']:.4f} "
+                  f"value={loss_info['value']:.4f}")
+
+            # Save curriculum checkpoint
+            self._save_checkpoint(i, prefix="curriculum_")
+
+        # Restore config
+        self.config.num_mcts_sims = saved_sims
+        self.config.num_self_play_games = saved_games
+        print(f"\nCurriculum pretraining complete. Weights carry over to Phase 2.")
+
+    def _run_full_training(self):
+        """Phase 2: Full AlphaZero training with triangle wins and draw shaping."""
         start = self.iteration + 1 if self.iteration > 0 else 0
         end = start + self.config.num_iterations
+
+        if self.config.curriculum_pretrain_iters > 0 and start == 0:
+            print(f"\n{'='*60}")
+            print(f"PHASE 2: Full training (triangle wins, draw shaping)")
+            print(f"{'='*60}")
 
         for iteration in range(start, end):
             self.iteration = iteration
@@ -57,12 +122,12 @@ class Coach:
             print(f"Iteration {iteration} (#{iteration - start + 1}/{self.config.num_iterations})")
             print(f"{'='*60}")
 
-            # 1. Self-play (parallel)
+            # 1. Self-play (parallel, triangle mode with draw shaping)
             print("\n--- Self-play ---")
             temp_ckpt = os.path.join(self.config.checkpoint_dir, "_temp_selfplay.pt")
             torch.save({'model_state_dict': self.network.state_dict()}, temp_ckpt)
             examples, stats = generate_self_play_data_parallel(
-                temp_ckpt, self.config)
+                temp_ckpt, self.config, win_mode='triangle')
             os.remove(temp_ckpt)
             print(f"Generated {stats['num_examples']} examples "
                   f"(P1={stats['wins_p1']} P2={stats['wins_p2']} D={stats['draws']} "
@@ -266,15 +331,15 @@ class Coach:
 
         return int(state.winner) if state.winner is not None else None
 
-    def _save_checkpoint(self, iteration):
-        path = os.path.join(self.config.checkpoint_dir, f"iteration_{iteration}.pt")
+    def _save_checkpoint(self, iteration, prefix="iteration_"):
+        path = os.path.join(self.config.checkpoint_dir, f"{prefix}{iteration}.pt")
         torch.save({
             'iteration': iteration,
             'model_state_dict': self.network.state_dict(),
         }, path)
 
-    def _load_checkpoint(self, iteration):
-        path = os.path.join(self.config.checkpoint_dir, f"iteration_{iteration}.pt")
+    def _load_checkpoint(self, iteration, prefix="iteration_"):
+        path = os.path.join(self.config.checkpoint_dir, f"{prefix}{iteration}.pt")
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         self.network.load_state_dict(checkpoint["model_state_dict"])
 
@@ -287,6 +352,8 @@ def main():
     parser.add_argument("--games", type=int, default=None)
     parser.add_argument("--sims", type=int, default=None)
     parser.add_argument("--resume", type=int, default=None, help="Resume from iteration")
+    parser.add_argument("--curriculum", type=int, default=None,
+                        help="Curriculum pretraining iterations (0 to skip)")
     args = parser.parse_args()
 
     config = Config()
@@ -296,6 +363,8 @@ def main():
         config.num_self_play_games = args.games
     if args.sims:
         config.num_mcts_sims = args.sims
+    if args.curriculum is not None:
+        config.curriculum_pretrain_iters = args.curriculum
 
     coach = Coach(config)
 

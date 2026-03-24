@@ -72,6 +72,7 @@ class NonagaState:
     __slots__ = [
         'tiles', 'pieces', 'current_player', 'ply_type',
         'last_moved_tile', 'piece_moved_from', 'winner',
+        'win_mode',
         '_piece_move_cache', '_tile_move_cache',
     ]
 
@@ -86,6 +87,7 @@ class NonagaState:
         self.last_moved_tile = None
         self.piece_moved_from = None
         self.winner = None
+        self.win_mode = 'triangle'
         self._piece_move_cache = None
         self._tile_move_cache = None
 
@@ -98,6 +100,7 @@ class NonagaState:
         s.last_moved_tile = self.last_moved_tile
         s.piece_moved_from = self.piece_moved_from
         s.winner = self.winner
+        s.win_mode = self.win_mode
         s._piece_move_cache = None
         s._tile_move_cache = None
         return s
@@ -110,19 +113,35 @@ class NonagaState:
     def is_terminal(self):
         return self.winner is not None
 
-    def _check_winner(self):
+    def _check_triangle_win(self):
         """Check if either player has won (3 pieces mutually adjacent)."""
         for player in Player:
             pcs = list(self.pieces[player])
             if len(pcs) != 3:
                 continue
-            # Three pieces are mutually adjacent if each pair shares a hex edge
             a, b, c = pcs
             nbrs_a = set(NEIGHBORS.get(a, ()))
             nbrs_b = set(NEIGHBORS.get(b, ()))
             if b in nbrs_a and c in nbrs_a and c in nbrs_b:
                 return player
         return None
+
+    def _check_adjacency_win(self):
+        """Check if any 2 pieces of same player are adjacent (curriculum mode)."""
+        for player in Player:
+            pcs = list(self.pieces[player])
+            for i in range(len(pcs)):
+                nbrs = set(NEIGHBORS.get(pcs[i], ()))
+                for j in range(i + 1, len(pcs)):
+                    if pcs[j] in nbrs:
+                        return player
+        return None
+
+    def _check_winner(self):
+        """Dispatch to the appropriate win check based on win_mode."""
+        if self.win_mode == 'adjacency':
+            return self._check_adjacency_win()
+        return self._check_triangle_win()
 
     # --- Edge tiles ---
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Nonaga board game with an AlphaZero-style training pipeline, but the AI currently plays no better than random. Too many self-play games end in draws, starving the value head of learning signal. Python for the game engine + training pipeline, single-file HTML for browser play. The AI uses MCTS with neural network priors (not minimax) because Nonaga's compound turns create a branching factor of ~300.
+Nonaga board game with neural network AI. Python for the game engine + training pipeline, single-file HTML for browser play. The AI uses greedy 1-ply evaluation: for each legal move, apply it, evaluate the resulting position with the NN value head, pick the best. This beats random 100% of the time. See `DESIGN_DECISIONS.md` for the full training story (curriculum learning, draw shaping, why MCTS failed, endgame training breakthrough).
 
 ## Commands
 
@@ -18,11 +18,20 @@ python -m train.coach --iterations 100 --games 100 --sims 100
 # Quick smoke test for training
 python -m train.coach --iterations 2 --games 5 --sims 10
 
+# Train with curriculum pretraining (adjacency wins first, then triangle)
+python -m train.coach --curriculum 20 --iterations 30 --games 100 --sims 50
+
 # Resume training from checkpoint
 python -m train.coach --iterations 100 --resume 49
 
+# Fast endgame bootstrap training (generates random games, trains value head)
+python -u fast_train.py
+
 # Export trained weights for browser
-python -m model.export_weights checkpoints/iteration_49.pt --output-dir web
+python -m model.export_weights checkpoints/endgame_trained.pt --output-dir web
+
+# Evaluate model vs random player
+python eval_vs_random.py checkpoints/endgame_trained.pt --games 50 --sims 50
 
 # Export to ONNX (alternative, not used by current browser frontend)
 python -m model.export_onnx checkpoints/iteration_49.pt --output web/model.onnx
@@ -57,11 +66,19 @@ Uses full 49-cell grid indexing (not just 37 valid cells) for simpler action enc
 
 ### Browser Frontend (web/index.html)
 
-Single-file: game engine (JS port), MCTS, and NN forward pass all in pure JS. Loads `weights.bin` + `manifest.json` via fetch. No ONNX runtime dependency. SVG hex board with click interactions. AI runs synchronously in the main thread with 30 MCTS simulations.
+Single-file: game engine (JS port), NN forward pass, and greedy AI all in pure JS. Loads `weights.bin` + `manifest.json` via fetch. No ONNX runtime dependency. SVG hex board with click interactions. AI uses greedy 1-ply: evaluates all legal moves with the NN value head and picks the best. Runs synchronously in the main thread.
 
 ### Training Pipeline
 
-`Coach` orchestrates: self-play → D6 augmentation (12× data) → train on replay buffer → arena (new vs old model) → accept/reject. Training data: `(board_6×7×7, ply_type, policy_target, value_target)`. Draws count as 0.5 in arena scoring.
+Two training approaches exist:
+
+1. **Endgame bootstrap** (`fast_train.py`): Generate random-vs-random games, extract last 30 plies of decisive games, train value head on these. This is how the current model was trained — fast and effective for bootstrapping.
+
+2. **AlphaZero-style** (`train/coach.py`): `Coach` orchestrates: self-play → D6 augmentation (12× data) → train on replay buffer → arena (new vs old model) → accept/reject. Supports curriculum pretraining (adjacency win mode) and draw shaping. Training data: `(board_6×7×7, ply_type, policy_target, value_target)`.
+
+### Configurable Win Condition
+
+`NonagaState` carries a `win_mode` attribute (`'triangle'` or `'adjacency'`). In adjacency mode, any 2 same-color pieces touching = win. This is used for curriculum pretraining where games need to terminate quickly with clear signal. The mode propagates through `copy()` so MCTS automatically respects it.
 
 ### D6 Symmetry (game/symmetry.py)
 
@@ -72,7 +89,7 @@ Hex board has 12 symmetries (6 rotations × 2 reflections). Axial rotation: `(q,
 - **Tile removal**: Only edge tiles with ≤4 tile neighbors can be removed (prevents interior holes). Must not be occupied, must not be the tile opponent just moved, and removal must keep board connected (BFS check).
 - **Tile placement**: Prefer positions with 2+ adjacent tiles for compactness. Falls back to 1+ adjacent if no 2+ options exist. Must maintain board connectivity.
 - **Piece sliding**: Pieces slide in a straight line until hitting another piece or running off tiles. Must move at least one cell.
-- **Win condition**: Three pieces of the same player all mutually adjacent (triangle).
+- **Win condition**: Three pieces of the same player all mutually adjacent (triangle). Configurable: `win_mode='adjacency'` makes 2-adjacent a win (for curriculum pretraining).
 
 ## Python ↔ JS Parity
 

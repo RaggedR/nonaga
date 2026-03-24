@@ -231,6 +231,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
   <button id="btn-new" onclick="newGame()">New Game</button>
   <button id="btn-undo" onclick="undo()" disabled>Undo</button>
   <button id="btn-ai" onclick="toggleAI()">AI: Off</button>
+  <button id="btn-ai-type" onclick="toggleAIType()">GA</button>
   <button id="btn-ai-move" onclick="aiMove()">AI Move</button>
   <button id="btn-coords" onclick="toggleCoords()">Coords</button>
 </div>
@@ -495,7 +496,7 @@ class GameState {
 }
 
 // ============================================================
-// MCTS (port of mcts.py)
+// AI move evaluation
 // ============================================================
 const PIECE_ACTION_SIZE = 49 * 6;  // 294
 const TILE_ACTION_SIZE = 49 * 49;  // 2401
@@ -503,19 +504,6 @@ const TILE_ACTION_SIZE = 49 * 49;  // 2401
 function pieceToAction(piece, dir) { return piece * 6 + dir; }
 function tileToAction(src, dst) { return src * 49 + dst; }
 
-class MCTSNode2 {
-  constructor(state, parent, action, prior) {
-    this.state = state;
-    this.parent = parent || null;
-    this.action = action || null;
-    this.children = [];
-    this.visits = 0;
-    this.valueSum = 0;
-    this.prior = prior || 0;
-    this.expanded = false;
-  }
-  get q() { return this.visits === 0 ? 0 : this.valueSum / this.visits; }
-}
 
 // ============================================================
 // Pure JS Neural Network Forward Pass
@@ -654,184 +642,213 @@ class NonagaNN {
 }
 
 // ============================================================
-// MCTS
+// Greedy 1-ply AI (evaluates all legal moves, picks best by NN value)
 // ============================================================
-class MCTS2 {
-  constructor(nn, sims, cpuct) {
+class GreedyAI {
+  constructor(nn) {
     this.nn = nn; // NonagaNN instance or null
-    this.sims = sims || 50;
-    this.cpuct = cpuct || 1.5;
-  }
-
-  search(state) {
-    const root = new MCTSNode2(state, null, null, 0);
-    this.expand(root);
-
-    // Dirichlet noise at root
-    if (root.children.length > 0) {
-      const noise = dirichlet(root.children.length, 0.3);
-      const eps = 0.25;
-      root.children.forEach((c, i) => {
-        c.prior = (1 - eps) * c.prior + eps * noise[i];
-      });
-    }
-
-    for (let i = 0; i < this.sims; i++) {
-      let node = root;
-      while (node.expanded && node.children.length > 0)
-        node = this.selectChild(node);
-      let value;
-      if (node.state.winner !== null) {
-        value = node.state.winner === node.state.current ? 1 : -1;
-      } else {
-        value = this.expand(node);
-      }
-      this.backup(node, value);
-    }
-    return this.getPolicy(root, state);
-  }
-
-  selectChild(node) {
-    let best = null, bestScore = -Infinity;
-    const sqrtN = Math.sqrt(node.visits);
-    for (const child of node.children) {
-      const q = -child.q;
-      const u = this.cpuct * child.prior * sqrtN / (1 + child.visits);
-      const score = q + u;
-      if (score > bestScore) { bestScore = score; best = child; }
-    }
-    return best;
-  }
-
-  expand(node) {
-    const state = node.state;
-    const moves = state.getLegalMoves();
-    if (moves.length === 0) { node.expanded = true; return 0; }
-
-    let pieceProbs, tileProbs, value;
-    if (this.nn) {
-      const board = state.encode();
-      const result = this.nn.predict(board);
-      pieceProbs = softmax(result.pieceLogits);
-      tileProbs = softmax(result.tileLogits);
-      value = result.value;
-    } else {
-      pieceProbs = new Float32Array(PIECE_ACTION_SIZE).fill(1/PIECE_ACTION_SIZE);
-      tileProbs = new Float32Array(TILE_ACTION_SIZE).fill(1/TILE_ACTION_SIZE);
-      value = 0;
-    }
-
-    const isPiece = state.ply === PLY_PIECE;
-    const policy = isPiece ? pieceProbs : tileProbs;
-    const actionFn = isPiece
-      ? m => pieceToAction(m[0], m[1])
-      : m => tileToAction(m[0], m[1]);
-
-    // Mask and normalize
-    let total = 0;
-    const priors = moves.map(m => { const p = policy[actionFn(m)]; total += p; return p; });
-    if (total > 0) priors.forEach((_, i) => priors[i] /= total);
-    else priors.fill(1 / moves.length);
-
-    for (let i = 0; i < moves.length; i++) {
-      const child = new MCTSNode2(state.applyMove(moves[i]), node, moves[i], priors[i]);
-      node.children.push(child);
-    }
-    node.expanded = true;
-    return value;
-  }
-
-  backup(node, value) {
-    let cur = node;
-    while (cur) {
-      cur.visits++;
-      cur.valueSum += value;
-      value = -value;
-      cur = cur.parent;
-    }
-  }
-
-  getPolicy(root, state) {
-    const isPiece = state.ply === PLY_PIECE;
-    const size = isPiece ? PIECE_ACTION_SIZE : TILE_ACTION_SIZE;
-    const actionFn = isPiece
-      ? m => pieceToAction(m[0], m[1])
-      : m => tileToAction(m[0], m[1]);
-    const policy = new Float32Array(size);
-    let total = 0;
-    for (const child of root.children) {
-      const a = actionFn(child.action);
-      policy[a] = child.visits;
-      total += child.visits;
-    }
-    if (total > 0) for (let i = 0; i < size; i++) policy[i] /= total;
-    return policy;
   }
 
   bestMove(state) {
-    const policy = this.search(state);
-    let bestIdx = 0;
-    for (let i = 1; i < policy.length; i++)
-      if (policy[i] > policy[bestIdx]) bestIdx = i;
     const moves = state.getLegalMoves();
-    const isPiece = state.ply === PLY_PIECE;
-    const actionFn = isPiece
-      ? m => pieceToAction(m[0], m[1])
-      : m => tileToAction(m[0], m[1]);
-    for (const m of moves)
-      if (actionFn(m) === bestIdx) return m;
-    return moves[0];
-  }
-}
+    if (moves.length === 0) return null;
 
-function softmax(arr) {
-  const max = Math.max(...arr);
-  const exp = arr.map(x => Math.exp(x - max));
-  const sum = exp.reduce((a, b) => a + b, 0);
-  return exp.map(x => x / sum);
-}
+    // No model — fall back to random
+    if (!this.nn) return moves[Math.floor(Math.random() * moves.length)];
 
-function dirichlet(n, alpha) {
-  // Approximate Dirichlet using gamma distribution
-  const samples = [];
-  let sum = 0;
-  for (let i = 0; i < n; i++) {
-    // Gamma(alpha, 1) approximation using Marsaglia's method for alpha < 1
-    let x;
-    if (alpha >= 1) {
-      // Simple gamma for alpha >= 1
-      const d = alpha - 1/3, c = 1/Math.sqrt(9*d);
-      while (true) {
-        let z, v;
-        do { z = randn(); v = 1 + c * z; } while (v <= 0);
-        v = v * v * v;
-        const u = Math.random();
-        if (u < 1 - 0.0331 * z * z * z * z) { x = d * v; break; }
-        if (Math.log(u) < 0.5 * z * z + d * (1 - v + Math.log(v))) { x = d * v; break; }
-      }
-    } else {
-      // Gamma(alpha+1) * U^(1/alpha)
-      const d = alpha + 1 - 1/3, c = 1/Math.sqrt(9*d);
-      while (true) {
-        let z, v;
-        do { z = randn(); v = 1 + c * z; } while (v <= 0);
-        v = v * v * v;
-        const u = Math.random();
-        if (u < 1 - 0.0331 * z * z * z * z) { x = d * v * Math.pow(Math.random(), 1/alpha); break; }
-        if (Math.log(u) < 0.5 * z * z + d * (1 - v + Math.log(v))) { x = d * v * Math.pow(Math.random(), 1/alpha); break; }
+    // Check for immediate wins first
+    for (const m of moves) {
+      const ns = state.applyMove(m);
+      if (ns.winner === state.current) return m;
+    }
+
+    // Evaluate each move: apply it, get NN value for resulting position
+    let bestVal = -Infinity;
+    let bestMove = moves[0];
+    const aiPlayer = state.current;
+
+    for (const m of moves) {
+      const ns = state.applyMove(m);
+
+      // NN value is from current player's perspective in the new state
+      const board = ns.encode();
+      const result = this.nn.predict(board);
+      // result.value is from ns.current's perspective
+      // If ns.current === aiPlayer, value is good for us as-is
+      // If ns.current !== aiPlayer, flip it
+      let val = result.value;
+      if (ns.current !== aiPlayer) val = -val;
+
+      if (val > bestVal) {
+        bestVal = val;
+        bestMove = m;
       }
     }
-    samples.push(x);
-    sum += x;
+    return bestMove;
   }
-  return samples.map(x => x / sum);
 }
 
-function randn() {
-  let u, v, s;
-  do { u = Math.random() * 2 - 1; v = Math.random() * 2 - 1; s = u*u + v*v; } while (s >= 1 || s === 0);
-  return u * Math.sqrt(-2 * Math.log(s) / s);
+
+// ============================================================
+// GA-Evolved Player (14 feature weights, beats NN 50-0)
+// ============================================================
+class GAPlayer {
+  constructor() {
+    // Best weights from island-model GA (200 gens, 5 islands × 16, ring topology)
+    this.weights = new Float32Array([
+      +1.4786,  // own_adj_pairs
+      +0.2034,  // opp_adj_pairs
+      +0.1659,  // own_completing_into
+      -6.3193,  // own_completing_past
+      -2.2200,  // opp_completing_into
+      +3.9814,  // opp_completing_past
+      +0.2487,  // own_backed
+      -2.9157,  // opp_backed
+      +0.0000,  // own_mobility
+      -0.0908,  // opp_mobility
+      +0.3922,  // own_min_dist
+      +0.0023,  // opp_min_dist
+      -1.1495,  // own_max_dist
+      +0.0044,  // opp_max_dist
+    ]);
+  }
+
+  _isSlideInto(cell, state) {
+    const occ = state.occupied;
+    const [q, r] = idxToQr(cell);
+    for (const [dq, dr] of DIRECTIONS) {
+      const nq = q + dq, nr = r + dr;
+      if (nq < 0 || nq >= GRID_SIZE || nr < 0 || nr >= GRID_SIZE ||
+          !VALID_SET.has(qrToIdx(nq, nr)) || !state.tiles.has(qrToIdx(nq, nr))) return true;
+      if (occ.has(qrToIdx(nq, nr))) return true;
+    }
+    return false;
+  }
+
+  computeFeatures(state) {
+    const features = new Float32Array(14);
+    const cur = state.current;
+    const opp = 1 - cur;
+
+    for (let pi = 0; pi < 2; pi++) {
+      const p = pi === 0 ? cur : opp;
+      const pcs = [...state.pieces[p]];
+      const occ = state.occupied;
+
+      // Adjacency pairs
+      let adjPairs = 0;
+      for (let i = 0; i < pcs.length; i++)
+        for (let j = i + 1; j < pcs.length; j++)
+          if ((NEIGHBORS[pcs[i]] || []).includes(pcs[j])) adjPairs++;
+
+      // Completing cells
+      let completingInto = 0, completingPast = 0;
+      for (let i = 0; i < pcs.length; i++) {
+        const nbrsI = new Set(NEIGHBORS[pcs[i]] || []);
+        for (let j = i + 1; j < pcs.length; j++) {
+          const nbrsJ = new Set(NEIGHBORS[pcs[j]] || []);
+          for (const cell of nbrsI) {
+            if (!nbrsJ.has(cell)) continue;
+            if (pcs.includes(cell)) continue;
+            if (!state.tiles.has(cell) || occ.has(cell)) continue;
+            if (this._isSlideInto(cell, state)) completingInto++;
+            else completingPast++;
+          }
+        }
+      }
+
+      // Backed pieces
+      let backed = 0;
+      for (const piece of pcs) {
+        const [q, r] = idxToQr(piece);
+        for (const [dq, dr] of DIRECTIONS) {
+          const nq = q + dq, nr = r + dr;
+          if (nq < 0 || nq >= GRID_SIZE || nr < 0 || nr >= GRID_SIZE ||
+              !VALID_SET.has(qrToIdx(nq, nr)) || !state.tiles.has(qrToIdx(nq, nr))) {
+            backed++;
+            break;
+          }
+        }
+      }
+
+      // Mobility
+      let mobility = 0;
+      for (const piece of pcs) {
+        const [q0, r0] = idxToQr(piece);
+        for (const [dq, dr] of DIRECTIONS) {
+          let nq = q0 + dq, nr = r0 + dr;
+          while (true) {
+            if (nq < 0 || nq >= GRID_SIZE || nr < 0 || nr >= GRID_SIZE) break;
+            if (!VALID_SET.has(qrToIdx(nq, nr)) || !state.tiles.has(qrToIdx(nq, nr))) break;
+            if (occ.has(qrToIdx(nq, nr))) break;
+            mobility++;
+            nq += dq; nr += dr;
+          }
+        }
+      }
+
+      // Pairwise hex distances
+      let minDist = 10, maxDist = 0;
+      if (pcs.length >= 2) {
+        for (let i = 0; i < pcs.length; i++) {
+          const [qi, ri] = idxToQr(pcs[i]);
+          for (let j = i + 1; j < pcs.length; j++) {
+            const [qj, rj] = idxToQr(pcs[j]);
+            const d = (Math.abs(qi - qj) + Math.abs(ri - rj) + Math.abs((qi + ri) - (qj + rj))) / 2;
+            minDist = Math.min(minDist, d);
+            maxDist = Math.max(maxDist, d);
+          }
+        }
+      }
+
+      if (pi === 0) { // own
+        features[0] = adjPairs; features[2] = completingInto;
+        features[3] = completingPast; features[6] = backed;
+        features[8] = mobility; features[10] = minDist; features[12] = maxDist;
+      } else { // opponent
+        features[1] = adjPairs; features[4] = completingInto;
+        features[5] = completingPast; features[7] = backed;
+        features[9] = mobility; features[11] = minDist; features[13] = maxDist;
+      }
+    }
+    return features;
+  }
+
+  evaluate(state) {
+    const features = this.computeFeatures(state);
+    let dot = 0;
+    for (let i = 0; i < 14; i++) dot += features[i] * this.weights[i];
+    return Math.tanh(dot);
+  }
+
+  bestMove(state) {
+    const moves = state.getLegalMoves();
+    if (moves.length === 0) return null;
+
+    // Check for immediate wins
+    for (const m of moves) {
+      const ns = state.applyMove(m);
+      if (ns.winner === state.current) return m;
+    }
+
+    let bestVal = -Infinity;
+    let bestMove = moves[0];
+    const aiPlayer = state.current;
+
+    for (const m of moves) {
+      const ns = state.applyMove(m);
+      let val = this.evaluate(ns);
+      // If tile move → next state is opponent's turn, negate
+      if (state.ply === PLY_TILE) val = -val;
+      if (val > bestVal) {
+        bestVal = val;
+        bestMove = m;
+      }
+    }
+    return bestMove;
+  }
 }
+
 
 // ============================================================
 // Rendering
@@ -867,7 +884,9 @@ let aiEnabled = false;
 let aiPlayer = P2;
 let aiThinking = false;
 let nnModel = null;  // NonagaNN instance
-let mcts = null;
+let gaPlayer = new GAPlayer();
+let aiType = 'ga';   // 'ga' or 'nn'
+let ai = null;       // GreedyAI or GAPlayer instance
 let showCoords = false;
 
 // Last-move tracking
@@ -1330,6 +1349,20 @@ function toggleAI() {
   }
 }
 
+function toggleAIType() {
+  const btn = document.getElementById('btn-ai-type');
+  if (aiType === 'ga') {
+    aiType = 'nn';
+    ai = nnModel ? new GreedyAI(nnModel) : new GreedyAI(null);
+    btn.textContent = 'NN';
+  } else {
+    aiType = 'ga';
+    ai = gaPlayer;
+    btn.textContent = 'GA';
+  }
+  document.getElementById('info').textContent = `AI: ${aiType === 'ga' ? 'GA evolved (14 weights)' : 'Neural network (570K params)'}`;
+}
+
 function aiMove() {
   if (gameState.winner !== null) return;
   if (aiThinking) return;
@@ -1339,11 +1372,11 @@ function aiMove() {
 
   setTimeout(() => {
     try {
-      if (!mcts) mcts = new MCTS2(nnModel, nnModel ? 30 : 15, 1.5);
+      if (!ai) ai = aiType === 'ga' ? gaPlayer : new GreedyAI(nnModel);
 
       // Step 1: Piece move
       if (gameState.ply === PLY_PIECE) {
-        const move = mcts.bestMove(gameState);
+        const move = ai.bestMove(gameState);
         const [pq,pr] = idxToQr(move[0]);
         const [lq,lr] = idxToQr(move[2]);
         console.log(`AI piece: (${pq},${pr}) → (${lq},${lr})`);
@@ -1401,7 +1434,7 @@ function aiDoTileMove() {
     gameState.current = 1 - gameState.current;
     gameState.ply = PLY_PIECE;
   } else {
-    const move = mcts.bestMove(gameState);
+    const move = ai.bestMove(gameState);
     const [sq,sr] = idxToQr(move[0]);
     const [dq,dr] = idxToQr(move[1]);
     console.log(`AI tile: remove (${sq},${sr}) → place (${dq},${dr})`);
@@ -1442,25 +1475,23 @@ async function loadModel() {
     }
 
     nnModel = new NonagaNN(weights);
-    mcts = new MCTS2(nnModel, 30, 1.5);
 
     // Quick sanity check: run one forward pass
     const testBoard = new Float32Array(6 * 7 * 7);
     nnModel.predict(testBoard);
 
     console.log('Model loaded:', Object.keys(manifest).length, 'tensors');
-    document.getElementById('info').textContent = 'AI model loaded — AI plays as Player 2';
-
-    // Enable AI by default
-    aiEnabled = true;
-    aiBtn.textContent = 'AI: On';
   } catch (e) {
-    console.log('No model found, using random AI:', e.message);
-    document.getElementById('info').textContent = 'No AI model — using random play (train a model first)';
-    mcts = new MCTS2(null, 15, 1.5);
-    aiEnabled = true;
-    aiBtn.textContent = 'AI: On';
+    console.log('No NN model found:', e.message);
   }
+
+  // Default to GA player (stronger — beats NN 50-0)
+  ai = gaPlayer;
+  aiType = 'ga';
+  document.getElementById('btn-ai-type').textContent = 'GA';
+  document.getElementById('info').textContent = 'GA player loaded — AI plays as Player 2';
+  aiEnabled = true;
+  aiBtn.textContent = 'AI: On';
 }
 
 // ============================================================

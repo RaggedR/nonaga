@@ -14,10 +14,76 @@ import numpy as np
 import random
 import multiprocessing as mp
 from game.nonaga import NonagaState, PlyType, Player
+from game.hex_grid import NEIGHBORS, DIRECTIONS, VALID_SET, idx_to_qr, qr_to_idx
 from train.mcts import MCTS
 
 
-def play_game(mcts, config):
+def _is_slide_into(cell, state):
+    """Check if a piece could stop at this cell (blocker or tile-edge behind it)."""
+    occ = state.occupied
+    q, r = idx_to_qr(cell)
+    for dq, dr in DIRECTIONS:
+        nq, nr = q + dq, r + dr
+        if (nq, nr) not in VALID_SET or qr_to_idx(nq, nr) not in state.tiles:
+            return True
+        if qr_to_idx(nq, nr) in occ:
+            return True
+    return False
+
+
+def _shaped_draw_value(state, player):
+    """
+    Small value signal for draws based on positional quality.
+
+    For every pair of same-color pieces, finds cells adjacent to both
+    (triangle-completing vertices) and scores them by slide-into-ability.
+    Adjacent pairs get a bonus on top. Also rewards backed pieces.
+    """
+    def pair_score(p):
+        """Score all pairs: slide-into-able completing cells + adjacency bonus."""
+        occ = state.occupied
+        pcs = list(state.pieces[p])
+        score = 0.0
+        for i in range(len(pcs)):
+            nbrs_i = set(NEIGHBORS.get(pcs[i], ()))
+            for j in range(i + 1, len(pcs)):
+                nbrs_j = set(NEIGHBORS.get(pcs[j], ()))
+                adjacent = pcs[j] in nbrs_i
+
+                # Bonus for pieces already touching
+                if adjacent:
+                    score += 1.0
+
+                # Find cells that would complete a triangle with this pair
+                completing = (nbrs_i & nbrs_j) - set(pcs)
+                for cell in completing:
+                    if cell not in state.tiles or cell in occ:
+                        continue
+                    if _is_slide_into(cell, state):
+                        score += 0.5  # reachable completing cell
+                    else:
+                        score += 0.1  # exists but hard to reach
+        return score
+
+    def backed_count(p):
+        """Count pieces with at least one direction blocked by tile edge."""
+        count = 0
+        for piece in state.pieces[p]:
+            q, r = idx_to_qr(piece)
+            for dq, dr in DIRECTIONS:
+                nq, nr = q + dq, r + dr
+                if (nq, nr) not in VALID_SET or qr_to_idx(nq, nr) not in state.tiles:
+                    count += 1
+                    break
+        return count
+
+    opp = Player(1 - player)
+    ps = (pair_score(Player(player)) - pair_score(opp)) * 0.08
+    bs = (backed_count(Player(player)) - backed_count(opp)) * 0.03
+    return max(-0.3, min(0.3, ps + bs))
+
+
+def play_game(mcts, config, win_mode='triangle'):
     """
     Play one self-play game.
 
@@ -25,6 +91,7 @@ def play_game(mcts, config):
     tuples. Value targets are filled in after the game ends.
     """
     state = NonagaState()
+    state.win_mode = win_mode
     examples = []
     ply_count = 0
 
@@ -64,10 +131,17 @@ def play_game(mcts, config):
     else:
         winner = -1  # draw
 
+    # Draw shaping only in full-rules mode (Phase 2) — curriculum games
+    # should produce clean binary signal
+    use_draw_shaping = (winner == -1 and win_mode == 'triangle')
+
     training_examples = []
     for ex in examples:
         if winner == -1:
-            value = 0.0
+            if use_draw_shaping:
+                value = _shaped_draw_value(state, ex['player'])
+            else:
+                value = 0.0
         elif ex['player'] == winner:
             value = 1.0
         else:
@@ -83,7 +157,7 @@ def play_game(mcts, config):
     return training_examples, state.winner, ply_count
 
 
-def generate_self_play_data(network, config, verbose=True):
+def generate_self_play_data(network, config, win_mode='triangle', verbose=True):
     """
     Generate training data from self-play games.
 
@@ -98,7 +172,7 @@ def generate_self_play_data(network, config, verbose=True):
     total_plies = 0
 
     for game_idx in range(config.num_self_play_games):
-        examples, winner, plies = play_game(mcts, config)
+        examples, winner, plies = play_game(mcts, config, win_mode=win_mode)
         all_examples.extend(examples)
         total_plies += plies
 
@@ -143,18 +217,19 @@ def _worker_play_games(args):
     for k, v in config_vals.items():
         setattr(config, k, v)
 
+    win_mode = config_vals.get('win_mode', 'triangle')
     mcts = MCTS(network, config)
 
     results = []
     for _ in range(num_games):
-        examples, winner, plies = play_game(mcts, config)
+        examples, winner, plies = play_game(mcts, config, win_mode=win_mode)
         winner_int = int(winner) if winner is not None else None
         results.append((examples, winner_int, plies))
 
     return results
 
 
-def generate_self_play_data_parallel(checkpoint_path, config, verbose=True):
+def generate_self_play_data_parallel(checkpoint_path, config, win_mode='triangle', verbose=True):
     """
     Generate training data using parallel self-play across multiple workers.
     Each worker loads the model on CPU and plays games independently.
@@ -173,6 +248,7 @@ def generate_self_play_data_parallel(checkpoint_path, config, verbose=True):
         'temp_threshold': config.temp_threshold,
         'temp_late': getattr(config, 'temp_late', 0.0),
         'max_game_plies': config.max_game_plies,
+        'win_mode': win_mode,
     }
 
     args_list = []
