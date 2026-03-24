@@ -267,6 +267,15 @@ Cross-play fixes this: when island i plays island (i+1), the resulting positions
 - Island 2 rejected at iterations 1-3 but recovered, finishing with the strongest final iteration (100% arena, value loss 0.68 — lowest of all islands)
 - Island trajectories diverged: island 0 learned to win fast (34 plies), island 1 played medium games (38), island 2 played longer (44)
 
+**Full training run** (5 islands, 50 iterations, 50 games/iter, 50 MCTS sims, 30% cross-play, ~12-18 hours estimated):
+
+Reduced from the original plan (100 iters × 100 games × 100 sims → ~4 days) to a feasible overnight run. The first test at 50 sims already showed good diversity dynamics, so halving search depth is acceptable. Key parameter choices:
+- 50 sims (vs 100): Still enough tree search to produce non-uniform policy targets; the sign-fixed MCTS works well even at 25 sims
+- 50 games/iter (vs 100): 35 self-play + 15 cross-play per island per iteration; fewer games but more iterations of the train loop
+- 50 iterations (vs 100): Should be enough to see whether cross-play diversity translates to strength — the single-model AlphaZero peaked by iteration ~27
+
+Results: *(pending — run in progress)*
+
 ## Possible Future Work
 
 1. ~~**Export to web**~~: Done — greedy 1-ply in JS, updated to iteration_27
