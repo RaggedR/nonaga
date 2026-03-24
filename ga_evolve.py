@@ -175,6 +175,12 @@ def greedy_move(state, weights):
     if not moves:
         return None
 
+    # Check for immediate wins first
+    for move in moves:
+        ns = state.apply_move(move)
+        if ns.winner is not None and int(ns.winner) == state.current_player:
+            return move
+
     best_move = None
     best_val = -float('inf')
 
@@ -297,8 +303,14 @@ def evaluate_island(pop, config):
 
     for i in range(n):
         for j in range(i + 1, n):
-            for _ in range(config.tournament_games):
-                winner, _ = play_game_ga(pop[i], pop[j], max_plies=config.max_game_plies)
+            for game_k in range(config.tournament_games):
+                # Alternate sides to avoid first-mover bias
+                if game_k % 2 == 0:
+                    winner, _ = play_game_ga(pop[i], pop[j], max_plies=config.max_game_plies)
+                else:
+                    winner, _ = play_game_ga(pop[j], pop[i], max_plies=config.max_game_plies)
+                    if winner is not None:
+                        winner = 1 - winner  # Flip back to i/j frame
                 games_played[i] += 1
                 games_played[j] += 1
                 if winner == 0:

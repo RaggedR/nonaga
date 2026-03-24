@@ -66,12 +66,18 @@ class IslandCoach:
 
         # Per-island state
         self.networks = []
+        self.optimizers = []
         self.replay_buffers = []
         self.checkpoint_dirs = []
 
         for i in range(self.num_islands):
             net = NonagaNet().to(self.device)
             self.networks.append(net)
+            self.optimizers.append(torch.optim.Adam(
+                net.parameters(),
+                lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            ))
             self.replay_buffers.append(deque(maxlen=self.config.replay_buffer_size))
             ckpt_dir = os.path.join(self.config.checkpoint_dir, f"island_{i}")
             os.makedirs(ckpt_dir, exist_ok=True)
@@ -138,18 +144,17 @@ class IslandCoach:
         total_games = self.config.num_self_play_games
         self_play_games = max(1, int(total_games * (1 - self.cross_play_rate)))
 
-        # Temporarily adjust config for reduced game count
-        saved_games = self.config.num_self_play_games
-        self.config.num_self_play_games = self_play_games
+        # Use a shallow copy of config to avoid mutating the shared instance
+        import copy
+        sp_config = copy.copy(self.config)
+        sp_config.num_self_play_games = self_play_games
 
         print(f"\n--- Island {island_idx}: self-play ({self_play_games} games) ---")
         temp_ckpt = os.path.join(ckpt_dir, "_temp_selfplay.pt")
         torch.save({'model_state_dict': net.state_dict()}, temp_ckpt)
         examples, stats = generate_self_play_data_parallel(
-            temp_ckpt, self.config, win_mode='triangle')
+            temp_ckpt, sp_config, win_mode='triangle')
         os.remove(temp_ckpt)
-
-        self.config.num_self_play_games = saved_games
 
         augmented = self._augment(examples)
         self.replay_buffers[island_idx].append(augmented)
@@ -278,6 +283,9 @@ class IslandCoach:
             ply_count += 1
 
         # Assign value targets (same logic as self_play.play_game)
+        # TODO: draw shaping uses final state for all positions — ideally each
+        # position should use its own state for shaped draw values. This is a
+        # known limitation shared with self_play.play_game.
         winner = int(state.winner) if state.winner is not None else -1
         use_draw_shaping = (winner == -1)
 
@@ -314,7 +322,7 @@ class IslandCoach:
         for b in buf:
             all_data.extend(b)
         random.shuffle(all_data)
-        loss_info = self._train_network(net, all_data)
+        loss_info = self._train_network(net, all_data, self.optimizers[island_idx])
         print(f"  Loss={loss_info['total']:.4f} "
               f"(p={loss_info['piece']:.4f} t={loss_info['tile']:.4f} "
               f"v={loss_info['value']:.4f}) on {len(all_data)} examples")
@@ -333,12 +341,13 @@ class IslandCoach:
                 else:
                     print(" → accepted")
 
-        # Save checkpoint
+        # Save checkpoint (includes optimizer state for proper resume)
         path = os.path.join(ckpt_dir, f"iteration_{iteration}.pt")
         torch.save({
             'iteration': iteration,
             'island': island_idx,
             'model_state_dict': net.state_dict(),
+            'optimizer_state_dict': self.optimizers[island_idx].state_dict(),
         }, path)
 
     def _ring_migrate(self):
@@ -449,17 +458,11 @@ class IslandCoach:
                     augmented.append((aug_board, ply_type, aug_tp, aug_val))
         return augmented
 
-    def _train_network(self, network, data):
-        """Train a single network on data (same logic as Coach._train_network)."""
+    def _train_network(self, network, data, optimizer):
+        """Train a single network on data using a persistent optimizer."""
         import torch.nn as nn
-        import torch.optim as optim
 
         network.train()
-        optimizer = optim.Adam(
-            network.parameters(),
-            lr=self.config.learning_rate,
-            weight_decay=self.config.weight_decay,
-        )
 
         total_loss_sum = 0
         piece_loss_sum = 0
@@ -591,6 +594,7 @@ class IslandCoach:
                 'iteration': iteration,
                 'island': isl,
                 'model_state_dict': self.networks[isl].state_dict(),
+                'optimizer_state_dict': self.optimizers[isl].state_dict(),
             }, path)
 
     def _load_all(self, iteration):
@@ -600,6 +604,8 @@ class IslandCoach:
             if os.path.exists(path):
                 checkpoint = torch.load(path, map_location='cpu', weights_only=True)
                 self.networks[isl].load_state_dict(checkpoint['model_state_dict'])
+                if 'optimizer_state_dict' in checkpoint:
+                    self.optimizers[isl].load_state_dict(checkpoint['optimizer_state_dict'])
                 print(f"  Island {isl}: loaded iteration {iteration}")
             else:
                 print(f"  Island {isl}: no checkpoint at {path}")
