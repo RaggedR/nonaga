@@ -35,6 +35,8 @@ from collections import deque
 import numpy as np
 import torch
 
+import multiprocessing as mp
+
 from game.nonaga import NonagaState, PlyType, Player
 from game.symmetry import augment_example
 from model.network import NonagaNet
@@ -42,6 +44,110 @@ from train.mcts import MCTS
 from train.self_play import generate_self_play_data_parallel, play_game, _shaped_draw_value
 from train.config import Config
 from train.coach import get_device, Coach
+
+
+def _cross_play_worker(args):
+    """Worker function for parallel cross-play. Runs in a separate process."""
+    ckpt_a_path, ckpt_b_path, num_games, seed, config_vals = args
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+
+    # Load both models on CPU
+    net_a = NonagaNet()
+    ckpt_a = torch.load(ckpt_a_path, map_location='cpu', weights_only=True)
+    net_a.load_state_dict(ckpt_a['model_state_dict'])
+    net_a.eval()
+
+    net_b = NonagaNet()
+    ckpt_b = torch.load(ckpt_b_path, map_location='cpu', weights_only=True)
+    net_b.load_state_dict(ckpt_b['model_state_dict'])
+    net_b.eval()
+
+    config = Config()
+    for k, v in config_vals.items():
+        setattr(config, k, v)
+
+    mcts_a = MCTS(net_a, config)
+    mcts_b = MCTS(net_b, config)
+
+    results = []
+    for g in range(num_games):
+        # Alternate sides
+        if (seed + g) % 2 == 0:
+            mcts_p1, mcts_p2 = mcts_a, mcts_b
+        else:
+            mcts_p1, mcts_p2 = mcts_b, mcts_a
+
+        examples, winner, ply_count = _play_one_cross_game_standalone(
+            mcts_p1, mcts_p2, config)
+        winner_int = int(winner) if winner is not None else None
+        results.append((examples, winner_int, ply_count))
+
+    return results
+
+
+def _play_one_cross_game_standalone(mcts_p1, mcts_p2, config):
+    """Play one cross-game (standalone version for worker processes)."""
+    state = NonagaState()
+    raw_examples = []
+    ply_count = 0
+
+    while not state.is_terminal() and ply_count < config.max_game_plies:
+        mcts = mcts_p1 if state.current_player == Player.ONE else mcts_p2
+
+        temp_late = getattr(config, 'temp_late', 0.0)
+        temp = 1.0 if ply_count < config.temp_threshold else temp_late
+
+        move, policy = mcts.get_action_with_temp(state, temperature=temp)
+
+        if move is None:
+            if state.ply_type == PlyType.TILE_MOVE:
+                state = state.copy()
+                state.current_player = Player(1 - state.current_player)
+                state.ply_type = PlyType.PIECE_MOVE
+                ply_count += 1
+                continue
+            else:
+                break
+
+        board = state.encode()
+        raw_examples.append({
+            'board': board,
+            'ply_type': int(state.ply_type),
+            'policy': policy,
+            'player': int(state.current_player),
+        })
+
+        state = state.apply_move(move)
+        ply_count += 1
+
+    # Assign value targets
+    # TODO: draw shaping uses final state for all positions (known limitation)
+    winner = int(state.winner) if state.winner is not None else -1
+    use_draw_shaping = (winner == -1)
+
+    training_examples = []
+    for ex in raw_examples:
+        if winner == -1:
+            if use_draw_shaping:
+                value = _shaped_draw_value(state, ex['player'])
+            else:
+                value = 0.0
+        elif ex['player'] == winner:
+            value = 1.0
+        else:
+            value = -1.0
+
+        training_examples.append((
+            ex['board'],
+            ex['ply_type'],
+            ex['policy'],
+            np.float32(value),
+        ))
+
+    return training_examples, state.winner, ply_count
 
 
 class IslandCoach:
@@ -191,122 +297,71 @@ class IslandCoach:
 
     def _play_cross_games(self, island_a, island_b, num_games):
         """
-        Play games between two islands' models. Returns training examples
-        for each island separately (with correct value targets).
+        Play games between two islands' models in parallel.
 
-        Alternates who plays as Player ONE to avoid first-move bias.
+        Saves both models to temp checkpoints, dispatches to workers.
+        Both islands get all examples (positions are informative for both).
         """
-        net_a = self.networks[island_a]
-        net_b = self.networks[island_b]
-        net_a.eval()
-        net_b.eval()
-        mcts_a = MCTS(net_a, self.config)
-        mcts_b = MCTS(net_b, self.config)
+        ckpt_dir_a = self.checkpoint_dirs[island_a]
+        ckpt_dir_b = self.checkpoint_dirs[island_b]
 
-        all_examples_a = []  # examples from island_a's perspective
-        all_examples_b = []  # examples from island_b's perspective
+        # Save temp checkpoints for workers
+        ckpt_a = os.path.join(ckpt_dir_a, "_temp_cross_a.pt")
+        ckpt_b = os.path.join(ckpt_dir_b, "_temp_cross_b.pt")
+        torch.save({'model_state_dict': self.networks[island_a].state_dict()}, ckpt_a)
+        torch.save({'model_state_dict': self.networks[island_b].state_dict()}, ckpt_b)
+
+        config_vals = {
+            'num_mcts_sims': self.config.num_mcts_sims,
+            'cpuct': self.config.cpuct,
+            'dirichlet_alpha': self.config.dirichlet_alpha,
+            'dirichlet_epsilon': self.config.dirichlet_epsilon,
+            'temp_threshold': self.config.temp_threshold,
+            'temp_late': getattr(self.config, 'temp_late', 0.0),
+            'max_game_plies': self.config.max_game_plies,
+        }
+
+        num_workers = min(getattr(self.config, 'num_workers', 8), num_games)
+        games_per_worker = num_games // num_workers
+        remainder = num_games % num_workers
+
+        args_list = []
+        for i in range(num_workers):
+            n = games_per_worker + (1 if i < remainder else 0)
+            if n > 0:
+                args_list.append((ckpt_a, ckpt_b, n, i * 10000 + 99, config_vals))
+
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(len(args_list)) as pool:
+            all_worker_results = pool.map(_cross_play_worker, args_list)
+
+        # Clean up temp checkpoints
+        os.remove(ckpt_a)
+        os.remove(ckpt_b)
+
+        # Aggregate results — both islands get all examples
+        all_examples = []
         wins = {0: 0, 1: 0}
         draws = 0
         total_plies = 0
 
-        for g in range(num_games):
-            # Alternate sides to avoid first-mover bias
-            if g % 2 == 0:
-                mcts_p1, mcts_p2 = mcts_a, mcts_b
-            else:
-                mcts_p1, mcts_p2 = mcts_b, mcts_a
-
-            examples, winner, ply_count = self._play_one_cross_game(
-                mcts_p1, mcts_p2)
-            total_plies += ply_count
-
-            if winner is not None:
-                wins[int(winner)] += 1
-            else:
-                draws += 1
-
-            # Split examples by which island generated them
-            for ex in examples:
-                # Both islands get all examples — the positions are
-                # informative for both. Value targets are already correct
-                # (relative to the player at that position).
-                all_examples_a.append(ex)
-                all_examples_b.append(ex)
+        for worker_results in all_worker_results:
+            for examples, winner, plies in worker_results:
+                all_examples.extend(examples)
+                total_plies += plies
+                if winner is not None:
+                    wins[winner] += 1
+                else:
+                    draws += 1
 
         stats = {
-            'num_examples': len(all_examples_a),
+            'num_examples': len(all_examples),
             'wins_p1': wins[0],
             'wins_p2': wins[1],
             'draws': draws,
             'avg_plies': total_plies / max(num_games, 1),
         }
-        return all_examples_a, all_examples_b, stats
-
-    def _play_one_cross_game(self, mcts_p1, mcts_p2):
-        """
-        Play one game with two different MCTS instances.
-        Returns training examples in the same format as self_play.play_game.
-        """
-        state = NonagaState()
-        raw_examples = []
-        ply_count = 0
-
-        while not state.is_terminal() and ply_count < self.config.max_game_plies:
-            mcts = mcts_p1 if state.current_player == Player.ONE else mcts_p2
-
-            temp_late = getattr(self.config, 'temp_late', 0.0)
-            temp = 1.0 if ply_count < self.config.temp_threshold else temp_late
-
-            move, policy = mcts.get_action_with_temp(state, temperature=temp)
-
-            if move is None:
-                if state.ply_type == PlyType.TILE_MOVE:
-                    state = state.copy()
-                    state.current_player = Player(1 - state.current_player)
-                    state.ply_type = PlyType.PIECE_MOVE
-                    ply_count += 1
-                    continue
-                else:
-                    break
-
-            board = state.encode()
-            raw_examples.append({
-                'board': board,
-                'ply_type': int(state.ply_type),
-                'policy': policy,
-                'player': int(state.current_player),
-            })
-
-            state = state.apply_move(move)
-            ply_count += 1
-
-        # Assign value targets (same logic as self_play.play_game)
-        # TODO: draw shaping uses final state for all positions — ideally each
-        # position should use its own state for shaped draw values. This is a
-        # known limitation shared with self_play.play_game.
-        winner = int(state.winner) if state.winner is not None else -1
-        use_draw_shaping = (winner == -1)
-
-        training_examples = []
-        for ex in raw_examples:
-            if winner == -1:
-                if use_draw_shaping:
-                    value = _shaped_draw_value(state, ex['player'])
-                else:
-                    value = 0.0
-            elif ex['player'] == winner:
-                value = 1.0
-            else:
-                value = -1.0
-
-            training_examples.append((
-                ex['board'],
-                ex['ply_type'],
-                ex['policy'],
-                np.float32(value),
-            ))
-
-        return training_examples, state.winner, ply_count
+        return all_examples, all_examples, stats
 
     def _island_train(self, island_idx, iteration):
         """Train one island on its accumulated replay buffer, run arena."""
