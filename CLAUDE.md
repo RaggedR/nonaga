@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Nonaga board game with neural network AI. Python for the game engine + training pipeline, single-file HTML for browser play. The AI uses greedy 1-ply evaluation: for each legal move, apply it, evaluate the resulting position with the NN value head, pick the best. This beats random 100% of the time. See `DESIGN_DECISIONS.md` for the full training story (curriculum learning, draw shaping, why MCTS failed, endgame training breakthrough).
+Nonaga board game with multiple AI approaches. Python for the game engine + training pipeline, single-file HTML for browser play. The default browser AI is a GA-evolved 14-weight evaluation function (greedy 1-ply), which beats the 570K-parameter neural network 50-0. The NN AI is also available via toggle. See `DESIGN_DECISIONS.md` for the full training story (curriculum learning, draw shaping, why MCTS failed, endgame training, island-model GA, island-model AlphaZero with cross-play).
 
 ## Commands
 
@@ -36,6 +36,15 @@ python eval_vs_random.py checkpoints/endgame_trained.pt --games 50 --sims 50
 # Export to ONNX (alternative, not used by current browser frontend)
 python -m model.export_onnx checkpoints/iteration_49.pt --output web/model.onnx
 
+# Island-model GA evolution (ring topology, 14-weight evaluation function)
+python ga_evolve.py
+python ga_evolve.py --islands 5 --pop 16 --gens 200  # full run
+python ga_evolve.py --islands 3 --pop 4 --gens 5 --tournament-games 1  # smoke test
+
+# Island-model AlphaZero with cross-play (ring topology, multiple NNs)
+python -m train.island_coach --islands 5 --iterations 100 --games 100 --sims 100
+python -m train.island_coach --islands 2 --iterations 2 --games 5 --sims 10  # smoke test
+
 # Serve browser game (must use HTTP server, not file://)
 cd web && python -m http.server 8000
 ```
@@ -66,15 +75,23 @@ Uses full 49-cell grid indexing (not just 37 valid cells) for simpler action enc
 
 ### Browser Frontend (web/index.html)
 
-Single-file: game engine (JS port), NN forward pass, and greedy AI all in pure JS. Loads `weights.bin` + `manifest.json` via fetch. No ONNX runtime dependency. SVG hex board with click interactions. AI uses greedy 1-ply: evaluates all legal moves with the NN value head and picks the best. Runs synchronously in the main thread.
+Single-file: game engine (JS port), two AI players, SVG hex board with click interactions. Runs synchronously in the main thread.
+
+- **GAPlayer** (default): 14-weight evaluation function evolved by island-model GA. Computes board features (adjacency, completing cells, mobility, distances) and picks the move with highest `tanh(features · weights)`. No NN needed — just 14 hardcoded floats.
+- **GreedyAI** (toggle): Loads `weights.bin` + `manifest.json`, runs NN forward pass, picks the move with highest value head output. Pure JS, no ONNX runtime.
+- Toggle button switches between GA and NN players.
 
 ### Training Pipeline
 
-Two training approaches exist:
+Four training approaches exist:
 
-1. **Endgame bootstrap** (`fast_train.py`): Generate random-vs-random games, extract last 30 plies of decisive games, train value head on these. This is how the current model was trained — fast and effective for bootstrapping.
+1. **Endgame bootstrap** (`fast_train.py`): Generate random-vs-random games, extract last 30 plies of decisive games, train value head on these. Fast and effective for bootstrapping.
 
-2. **AlphaZero-style** (`train/coach.py`): `Coach` orchestrates: self-play → D6 augmentation (12× data) → train on replay buffer → arena (new vs old model) → accept/reject. Supports curriculum pretraining (adjacency win mode) and draw shaping. Training data: `(board_6×7×7, ply_type, policy_target, value_target)`.
+2. **AlphaZero-style** (`train/coach.py`): `Coach` orchestrates: self-play → D6 augmentation (12× data) → train on replay buffer → arena (new vs old model) → accept/reject. Supports curriculum pretraining (adjacency win mode) and draw shaping.
+
+3. **Island-model GA** (`ga_evolve.py`): Evolves 14-weight evaluation functions on a ring topology. No NN — pure feature-weighted greedy play. Currently the strongest AI (beats the NN 50-0).
+
+4. **Island-model AlphaZero** (`train/island_coach.py`): N neural nets on a ring with cross-play between neighbors. Each iteration: 70% self-play + 30% cross-play → train → arena. Ring topology preserves diversity that standard AlphaZero loses.
 
 ### Configurable Win Condition
 

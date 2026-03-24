@@ -139,9 +139,10 @@ We discovered #1 first. Then spent Attempts 6+ trying to fix the policy prior, w
 
 ## Current State
 
-- **Web frontend**: Serves iteration_27 weights (greedy 1-ply evaluation in JS)
-- **Best checkpoint**: iteration_27 (19.1 avg plies vs random)
-- **Training pipeline**: Fully operational — self-play, D6 augmentation, arena gating all working
+- **Web frontend**: GA player is the default AI (14 evolved weights, greedy 1-ply). NN player available via toggle button.
+- **GA beats NN**: 50-0 in head-to-head (14 weights vs 570K parameters)
+- **Best GA weights**: from island 0 of 200-generation ring-migration run
+- **Training pipelines**: GA evolution, single-model AlphaZero, and island-model AlphaZero with cross-play all operational
 
 ## SAE Probe on Value Head (Attempt 9)
 
@@ -276,5 +277,5 @@ Cross-play fixes this: when island i plays island (i+1), the resulting positions
 6. **Stronger opponents**: Evaluate model-vs-model across checkpoints, or find/build a stronger Nonaga AI
 7. ~~**Island-model GA**~~: Done — `ga_evolve.py` with ring topology (Attempt 10, Phase 1)
 8. **SAE re-probe**: Re-run SAE on stronger model after extended training to extract reliable features for GA
-9. **GA→web export**: If GA evolves strong feature weights, export them as an alternative AI for the browser frontend (no NN needed, just 14 weights + feature computation in JS)
+9. ~~**GA→web export**~~: Done — GAPlayer is the default browser AI with hardcoded evolved weights
 10. **League training**: Keep historical checkpoints as sparring partners — model occasionally plays against older versions of itself for additional diversity
