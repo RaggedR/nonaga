@@ -26,6 +26,7 @@ Usage:
     python -m train.island_coach --islands 5 --iterations 100 --resume 20
 """
 
+import copy
 import os
 import random
 import time
@@ -145,7 +146,6 @@ class IslandCoach:
         self_play_games = max(1, int(total_games * (1 - self.cross_play_rate)))
 
         # Use a shallow copy of config to avoid mutating the shared instance
-        import copy
         sp_config = copy.copy(self.config)
         sp_config.num_self_play_games = self_play_games
 
@@ -210,13 +210,11 @@ class IslandCoach:
         total_plies = 0
 
         for g in range(num_games):
-            # Alternate sides
+            # Alternate sides to avoid first-mover bias
             if g % 2 == 0:
                 mcts_p1, mcts_p2 = mcts_a, mcts_b
-                island_as_player = Player.ONE
             else:
                 mcts_p1, mcts_p2 = mcts_b, mcts_a
-                island_as_player = Player.TWO
 
             examples, winner, ply_count = self._play_one_cross_game(
                 mcts_p1, mcts_p2)
