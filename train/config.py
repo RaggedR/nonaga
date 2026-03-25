@@ -12,7 +12,7 @@ class Config:
     num_self_play_games = 100   # Games per iteration
     temp_threshold = 30         # Plies before switching to low temp
     temp_late = 1.0             # Temperature after threshold (keep stochastic for decisive games)
-    max_game_plies = 500        # Max plies before declaring draw
+    max_game_plies = 200        # Max plies before declaring draw (was 500, reduced to cut outlier games)
 
     # --- Training ---
     num_iterations = 100        # Total training iterations
