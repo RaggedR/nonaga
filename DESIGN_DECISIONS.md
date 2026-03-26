@@ -274,7 +274,27 @@ Reduced from the original plan (100 iters × 100 games × 100 sims → ~4 days) 
 - 50 games/iter (vs 100): 35 self-play + 15 cross-play per island per iteration; fewer games but more iterations of the train loop
 - 50 iterations (vs 100): Should be enough to see whether cross-play diversity translates to strength — the single-model AlphaZero peaked by iteration ~27
 
-Results: *(pending — run in progress)*
+Results (20 iterations completed, stopped early due to increasing iteration times):
+
+- `max_game_plies` reduced from 500 → 200 mid-run (iteration 12) to cut outlier games
+- Cross-play parallelized mid-run to speed up (multiprocessing pool, same as self-play)
+- Iteration times still grew: 12 min (iter 0) → 50-90 min (iter 12-16) → 200 min (iter 17) as models got stronger and games more contested
+- Loss dropped from ~11 (iter 0) to 6.5 (iter 18)
+- Diversity held at 0.25-0.28 throughout — cross-play successfully prevented the 93% opening convergence seen in standard AlphaZero
+
+**Head-to-head vs GA (20 iterations, greedy 1-ply NN vs greedy 1-ply GA):**
+
+| Island | GA win rate (20 games) | Notes |
+|--------|----------------------|-------|
+| 0 | 100% | GA dominates |
+| 1 | 100% | GA dominates |
+| **2** | **50%** | Competitive — confirmed at 50 games |
+| 3 | 100% | GA dominates |
+| 4 | 100% | GA dominates |
+
+**Key finding**: Ring topology preserved enough diversity for one island (island 2) to discover a competitive strategy, matching the GA's 14-weight evaluation at 50/50. But 4 of 5 islands failed to find it — the NN's 570K parameters mostly can't match 14 well-chosen weights. Island 2 was the same outlier that struggled early (rejected iterations 1-3 in the first test run) but recovered strongest — its divergent trajectory let it explore where the others converged.
+
+**GA still wins overall**: The 14-weight evolved evaluation function remains the strongest Nonaga AI. The NN's advantage (capacity to represent complex patterns) is offset by the difficulty of discovering the right patterns through self-play. The GA's search space is tiny (14 reals) but perfectly aligned with the game's strategic structure.
 
 ## Possible Future Work
 
