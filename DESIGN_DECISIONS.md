@@ -312,6 +312,26 @@ Results (53 iterations completed across multiple sessions):
 
 **GA wins overall**: The 14-weight evolved evaluation function remains the strongest Nonaga AI. The NN's advantage (capacity to represent complex patterns) is offset by the difficulty of discovering the right patterns through self-play. The GA's search space is tiny (14 reals) but perfectly aligned with the game's strategic structure.
 
+### Why Greedy 1-Ply Beats MCTS (and Why This Matters)
+
+Both the GA player and the NN evaluation use **greedy 1-ply search**: evaluate all legal moves one step ahead, pick the best. No tree search. This sidesteps Nonaga's high branching factor (~18 piece moves × ~100+ tile placements) which made MCTS ineffective throughout the project:
+
+- **Attempt 5**: Endgame-trained value head was excellent (near-triangle: +0.52, opponent's near-triangle: -0.90) but MCTS at 25, 50, and 200 sims still got **0% wins vs random**. The uniform policy prior spread search budget evenly across 100+ moves — each move got ~2 visits at depth, not enough to find winning lines.
+- **Attempt 7**: Fixed the MCTS sign bug (two-ply turns broke alternating backup). MCTS at 25 sims jumped to **100% vs random** — but only because the value head was already good enough to guide shallow search. The policy head never became strong enough to focus deep search.
+- **Greedy 1-ply** with the same value head also got 100% vs random, at a fraction of the compute. It evaluates ~18-100 positions (one per legal move) instead of building a tree of thousands of nodes.
+
+**The implication for the GA comparison**: AlphaZero trains with MCTS (building policy targets from visit counts) but we evaluate with greedy 1-ply (value head only, ignoring the policy). The NN was optimized for a different use case than how we tested it. A fairer comparison would be NN+MCTS vs GA — the policy head might direct search toward the right moves even if the value head alone isn't as sharp as the GA's 14 weights. This comparison has not been run.
+
+### Why the NN Can't Find What the GA Found
+
+The GA's dominant feature (`own_completing_past = -6.3`) is a subtle spatial relationship: cells that *look like* triangle-completing positions but can't actually be reached by sliding a piece into them. This requires:
+
+1. Identifying pairs of same-color pieces
+2. Finding cells adjacent to both (completing vertices)
+3. Checking whether any piece can slide *into* (not past) each completing cell
+
+The GA is *given* these 14 precomputed features and only needs to find weights — a 14-dimensional optimization. The NN must discover these features from raw 6×7×7 binary board tensors through self-play game outcomes. It's learning both the features AND the weights simultaneously, from a noisy signal (win/loss/draw) that doesn't indicate *which* feature mattered. Self-play also acts as a local optimizer — it finds strategies that beat the previous version, not globally optimal strategies — so if early training doesn't stumble onto the "completing_past" concept, later training may never escape that basin.
+
 ## Possible Future Work
 
 1. ~~**Export to web**~~: Done — greedy 1-ply in JS, updated to iteration_27
