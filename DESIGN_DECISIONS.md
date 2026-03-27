@@ -378,4 +378,50 @@ By imitating the GA's policy directly, the NN's policy head learns which moves t
 
 The key question: can the NN, given direct supervision from the GA's strategic features, learn to represent those features internally? If yes, it should match the GA. If it can also learn *additional* patterns (the NN has 570K parameters vs 14 weights), it might surpass it.
 
-Results: *(pending — run in progress)*
+### Results (12 iterations, stopped — not working)
+
+| Iter | NN training wins | Avg plies (train) | Avg plies (eval) | Eval win rate |
+|------|-----------------|-------------------|------------------|---------------|
+| 0 | 9/500 (1.8%) | 35 | 66 | 0% |
+| 4 | 4/500 | 28 | 12 | 0% |
+| 8 | 12/500 (2.4%) | 35 | 42 | 0% |
+| 11 | 18/500 (3.6%) | 35 | 22 | 0% |
+
+The NN never won a single evaluation game across 12 iterations (600 eval games total). Training wins crept from 1.8% to 3.6% but those are from ε-greedy exploration stumbling into wins, not learned skill. Survival time bounced erratically (12-66 plies) with no upward trend.
+
+**Why it failed**:
+1. **Policy-value mismatch**: The GA imitation trains the *policy* head, but move selection uses the *value* head (greedy 1-ply). The policy head's knowledge never reaches move selection.
+2. **Poisoned training positions**: Half the game positions come from the NN's own bad moves. The GA policy targets answer "what would GA do in this mess?" — not "what would GA do in positions that matter."
+3. **Value loss was too easy**: Value loss dropped to 0.05-0.13 immediately — the shaped values are simple to fit but don't teach positional evaluation.
+
+## Why AlphaZero Is a Poor Fit for Nonaga
+
+After 10+ training approaches (curriculum, draw shaping, endgame bootstrap, MCTS sign fix, self-play loop, island GA, island AlphaZero with cross-play, and GA imitation), the pattern is clear: the NN can match the GA at best (50/50 on one island) but never surpass it. This isn't an implementation bug — it's a structural mismatch.
+
+### The strategic space is too small
+
+Nonaga's winning strategy fits in 14 numbers. The dominant feature (`own_completing_past = -6.3`) encodes: "avoid positions that look like near-wins but where you can't actually land a piece." This one feature, correctly weighted, accounts for most of the GA's strength.
+
+AlphaZero shines when the strategic space is too vast for humans to enumerate — Go's whole-board patterns, Chess's long-range piece interactions. When 14 features suffice, the NN's 570K parameters are searching a haystack for a needle that the GA found by directly searching the needle space.
+
+### Feature discovery from raw board state is the wrong problem
+
+The key feature requires multi-hop spatial reasoning:
+1. Find pairs of same-color pieces
+2. Find cells adjacent to both (completing vertices)
+3. Check whether any piece can slide *into* (not past) each completing cell
+
+A small ResNet learning from noisy game outcomes is a terrible way to discover this. The GA gets these as precomputed inputs — it only needs to find the weights. The NN must learn both features AND weights from 6×7×7 binary grids.
+
+### The branching factor punishes search
+
+~100+ tile moves means MCTS spreads too thin at practical sim counts. Greedy 1-ply works but doesn't use the policy head — defeating the purpose of AlphaZero's train-policy-via-MCTS loop.
+
+### When does AlphaZero beat hand-designed evaluation?
+
+When the game's strategic complexity exceeds what humans can enumerate in features:
+- **Nonaga** (19 tiles, 6 pieces): 14 features suffice → GA wins
+- **Chess** (~30 piece types × 64 squares): Dozens of features work well, but deep positional evaluation requires patterns that emerge from piece interactions → AlphaZero wins by a small margin over Stockfish-style engines
+- **Go** (361 intersections, emergent whole-board patterns): Impossible to enumerate → AlphaZero wins by necessity
+
+The crossover point is somewhere between Nonaga and Chess. Nonaga is firmly on the "features are enough" side.
