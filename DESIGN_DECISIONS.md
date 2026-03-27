@@ -426,6 +426,12 @@ When the game's strategic complexity exceeds what humans can enumerate in featur
 
 The crossover point is somewhere between Nonaga and Chess. Nonaga is firmly on the "features are enough" side.
 
+### Attempt 12: Distillation from GA Self-Play (`train_distill.py`)
+
+- **Idea**: Have the NN watch GA-vs-GA games and learn from pure expert play — no RL, no exploration, just supervised learning on positions where both players are strong.
+- **Result**: **0 decisive games out of 1000.** Two identical GAs draw every single game (200 plies, max game limit). Same draw problem that plagued AlphaZero self-play from Attempt 1. Evenly matched opponents in Nonaga produce no learning signal.
+- **Lesson**: Nonaga fundamentally resists self-play between equal opponents. Decisive games only happen when one player is weaker. This is a property of the game, not the training method.
+
 ### Policy Head vs Value Head (Quick Fix Attempt)
 
 Tested whether using the policy head for move selection (instead of value head greedy) would help:
