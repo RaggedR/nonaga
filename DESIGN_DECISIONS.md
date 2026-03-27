@@ -425,3 +425,17 @@ When the game's strategic complexity exceeds what humans can enumerate in featur
 - **Go** (361 intersections, emergent whole-board patterns): Impossible to enumerate → AlphaZero wins by necessity
 
 The crossover point is somewhere between Nonaga and Chess. Nonaga is firmly on the "features are enough" side.
+
+### Policy Head vs Value Head (Quick Fix Attempt)
+
+Tested whether using the policy head for move selection (instead of value head greedy) would help:
+
+| Checkpoint | Value head vs GA | Policy head vs GA |
+|-----------|-----------------|-------------------|
+| vs_ga iter 11 | 0% | 0% |
+| island 2 iter 20 | 50% | 50% |
+| island 0 iter 53 | 50% (25W-0L-25D) | 0% |
+
+**Finding**: GA imitation training destroyed island 2's learned strategy (50% → 0%). The policy and value heads are roughly equivalent for strong models (island 2: 50% either way). The training-against-GA approach poisoned the weights by training on positions from the NN's own bad play.
+
+**Conclusion**: Island-model AlphaZero with cross-play (Attempt 10, Phase 2) remains the best NN training approach — island 2 at iteration 20 is the strongest NN checkpoint at 50/50 against the GA. The GA's 14 evolved weights remain unbeaten.
