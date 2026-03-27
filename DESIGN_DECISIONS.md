@@ -274,27 +274,43 @@ Reduced from the original plan (100 iters × 100 games × 100 sims → ~4 days) 
 - 50 games/iter (vs 100): 35 self-play + 15 cross-play per island per iteration; fewer games but more iterations of the train loop
 - 50 iterations (vs 100): Should be enough to see whether cross-play diversity translates to strength — the single-model AlphaZero peaked by iteration ~27
 
-Results (20 iterations completed, stopped early due to increasing iteration times):
+Results (53 iterations completed across multiple sessions):
 
 - `max_game_plies` reduced from 500 → 200 mid-run (iteration 12) to cut outlier games
 - Cross-play parallelized mid-run to speed up (multiprocessing pool, same as self-play)
-- Iteration times still grew: 12 min (iter 0) → 50-90 min (iter 12-16) → 200 min (iter 17) as models got stronger and games more contested
-- Loss dropped from ~11 (iter 0) to 6.5 (iter 18)
-- Diversity held at 0.25-0.28 throughout — cross-play successfully prevented the 93% opening convergence seen in standard AlphaZero
+- Iteration times varied: 12 min (iter 0) → 25-40 min (typical) → 200 min (outliers from long cross-play games)
+- Loss dropped from ~11 (iter 0) to ~6.2 (iter 53), plateauing around iter 30
+- Diversity held at 0.24-0.35 throughout — cross-play successfully prevented the 93% opening convergence seen in standard AlphaZero
 
-**Head-to-head vs GA (20 iterations, greedy 1-ply NN vs greedy 1-ply GA):**
+**Head-to-head vs GA at iteration 20 (greedy 1-ply NN vs greedy 1-ply GA, 20 games):**
 
-| Island | GA win rate (20 games) | Notes |
-|--------|----------------------|-------|
+| Island | GA win rate | Notes |
+|--------|-----------|-------|
 | 0 | 100% | GA dominates |
 | 1 | 100% | GA dominates |
 | **2** | **50%** | Competitive — confirmed at 50 games |
 | 3 | 100% | GA dominates |
 | 4 | 100% | GA dominates |
 
-**Key finding**: Ring topology preserved enough diversity for one island (island 2) to discover a competitive strategy, matching the GA's 14-weight evaluation at 50/50. But 4 of 5 islands failed to find it — the NN's 570K parameters mostly can't match 14 well-chosen weights. Island 2 was the same outlier that struggled early (rejected iterations 1-3 in the first test run) but recovered strongest — its divergent trajectory let it explore where the others converged.
+**Head-to-head vs GA at iteration 53 (50 games each):**
 
-**GA still wins overall**: The 14-weight evolved evaluation function remains the strongest Nonaga AI. The NN's advantage (capacity to represent complex patterns) is offset by the difficulty of discovering the right patterns through self-play. The GA's search space is tiny (14 reals) but perfectly aligned with the game's strategic structure.
+| Island | GA win rate | Change from iter 20 |
+|--------|-----------|-------------------|
+| **0** | **50%** | Improved (was 100%) |
+| **1** | **50%** | Improved (was 100%) |
+| 2 | 100% | Regressed (was 50%) |
+| 3 | 100% | No change |
+| **4** | **50%** | Improved (was 100%) |
+
+**Key findings**:
+
+1. **Ring migration diffuses strategies**: Island 2 peaked early (50/50 at iter 20) but regressed to 100% GA wins by iter 53. Meanwhile its ring neighbors (islands 0 and 4, both adjacent on the ring) improved from 100% to 50%. The strong strategy diffused outward but got diluted at the source — exactly the ring topology trade-off.
+
+2. **3 of 5 islands reached parity, but none surpassed the GA**: The best any island achieved was 50/50 against 14 evolved weights. The NN's 570K parameters can match but not exceed what the GA found.
+
+3. **Loss plateaued while play strength improved**: Island 2's loss barely moved from iter 23-53 (6.5→6.2) yet islands 0, 1, 4 went from losing to tying. Training loss is a poor proxy for play strength in this regime.
+
+**GA wins overall**: The 14-weight evolved evaluation function remains the strongest Nonaga AI. The NN's advantage (capacity to represent complex patterns) is offset by the difficulty of discovering the right patterns through self-play. The GA's search space is tiny (14 reals) but perfectly aligned with the game's strategic structure.
 
 ## Possible Future Work
 
