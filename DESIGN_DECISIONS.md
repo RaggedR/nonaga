@@ -344,3 +344,38 @@ The GA is *given* these 14 precomputed features and only needs to find weights �
 8. **SAE re-probe**: Re-run SAE on stronger model after extended training to extract reliable features for GA
 9. ~~**GA→web export**~~: Done — GAPlayer is the default browser AI with hardcoded evolved weights
 10. **League training**: Keep historical checkpoints as sparring partners — model occasionally plays against older versions of itself for additional diversity
+
+## Attempt 11: Train NN Against GA (Knowledge Distillation)
+
+The island AlphaZero's core problem: self-play is a local optimizer that struggles with feature discovery. The GA already found the right features — why not teach them to the NN directly?
+
+### Approach (`train_vs_ga.py`)
+
+Two innovations over standard AlphaZero self-play:
+
+1. **Game-length-shaped values**: Instead of binary win/loss, the value signal is shaped by how long the NN survives against the GA. A position from a 20-ply loss is worse than one from a 100-ply loss. This gives gradient even when losing every game:
+   ```
+   value = -1.0 + 0.8 * (plies_survived / max_plies)
+   ```
+
+2. **GA policy imitation**: At every position, compute the GA's preferred move distribution (softmax over its 14-feature evaluation of all legal moves) and use it as the policy target. This directly transfers the GA's strategic knowledge into the NN — the NN learns *what the GA would do* at each position, not just whether it won or lost.
+
+Data generation is ~5ms/game (the GA needs no MCTS — just 14 dot products per move). 500 training games take ~15 seconds vs hours for MCTS self-play.
+
+### Parameters
+- Starting checkpoint: best island model (island 2, iteration 20 — the 50/50 performer)
+- 500 games per iteration, 20 iterations
+- NN plays ε-greedy (15% random exploration) vs GA at full strength
+- Policy temperature 0.5 (peaked but not one-hot softmax over GA evaluations)
+- D6 augmentation (12× data), 5 training epochs per iteration
+- Persistent Adam optimizer (LR=0.001)
+
+### Why This Might Work
+
+The GA sidesteps the branching problem by using greedy 1-ply search — no MCTS tree, just evaluate all legal moves one step ahead. Both the GA and NN evaluation use this same greedy approach. The NN was trained with MCTS (50 sims) but evaluated without it — the policy head was trained but never used at test time.
+
+By imitating the GA's policy directly, the NN's policy head learns which moves the GA considers best. And by training against a strong opponent instead of itself, the NN sees positions that matter strategically — board states near wins and losses, not the circular positions from self-play draws.
+
+The key question: can the NN, given direct supervision from the GA's strategic features, learn to represent those features internally? If yes, it should match the GA. If it can also learn *additional* patterns (the NN has 570K parameters vs 14 weights), it might surpass it.
+
+Results: *(pending — run in progress)*
