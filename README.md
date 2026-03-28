@@ -34,7 +34,7 @@ Standard AlphaZero training couldn't produce a competent player. The root cause 
 4. The policy reinforces triangle-avoidance in a vicious cycle
 5. Random play (which stumbles into triangles accidentally) wins ~50% while the trained model wins 0%
 
-We tried curriculum pretraining (adjacency wins), draw shaping, training against random opponents, and imitation learning from random games. None broke through. See `DESIGN_DECISIONS.md` for the full 12-attempt saga.
+We tried curriculum pretraining (adjacency wins), draw shaping, training against random opponents, and imitation learning from random games. None broke through. See `DESIGN_DECISIONS.md` for the full 13-attempt saga.
 
 ### The endgame bootstrap (Attempt 5)
 
@@ -69,15 +69,17 @@ Cross-play was the key ingredient standard AlphaZero lacked. In normal self-play
 
 Island 2's strong strategy diffused outward along the ring to neighbors 0 and 4, but got diluted at the source (regressed from 50% to 0%). This is exactly the ring topology trade-off: slow diffusion preserves diversity but the originating island loses its edge.
 
-Three of five islands matched the GA. None surpassed it. This is the only NN training approach that achieved any wins against the GA — direct training against the GA (Attempt 11) and GA self-play distillation (Attempt 12) both scored 0%.
+Three of five islands matched the GA. None surpassed it.
 
 ### What failed: training the NN from the GA
 
-Two attempts to transfer the GA's knowledge into the NN both failed:
+Three attempts to transfer the GA's knowledge into the NN all hit the same 50% ceiling or worse:
 
 **Attempt 11 (NN plays against GA)**: The NN plays the GA with policy imitation (learn what the GA would do) and game-length-shaped values. 0% eval win rate across 12 iterations. Three problems stacked: (1) policy imitation trains the policy head but move selection uses the value head — the knowledge never reaches decisions; (2) half the training positions come from the NN's own bad moves, which the GA would never encounter; (3) the shaped value signal was trivially easy to fit but didn't teach positional evaluation.
 
 **Attempt 12 (NN watches GA self-play)**: Pure supervised learning from GA-vs-GA games. 0 decisive games out of 1,000 — two identical GAs draw every single game. Same draw problem that plagued AlphaZero from the start. Decisive outcomes require asymmetry in skill, which means self-play between equals produces no learning signal. This is a property of Nonaga, not the training method.
+
+**Attempt 13 (league training)**: The NN plays three opponent types each iteration — GA (aspirational losses), self (competitive), and weaker self/random (wins) — training only the value head. This reached 50% vs GA in 2 iterations (~2 minutes), matching island AlphaZero's 53-iteration result. But 50% is the ceiling: the starting checkpoint was already at 50/50 before league training began. Three independent approaches (island AlphaZero, supervised from GA, league training) all converge to the same barrier.
 
 ### Why the GA wins
 
@@ -99,6 +101,10 @@ python tests/test_game.py
 python ga_evolve.py
 python ga_evolve.py --islands 5 --pop 16 --gens 200              # full run
 python ga_evolve.py --islands 3 --pop 4 --gens 5 --tournament-games 1  # smoke test
+
+# League training: NN vs GA + self + weaker self
+python -u train_from_ga.py
+python -u train_from_ga.py --iterations 3 --games 10 --eval-games 10  # smoke test
 
 # Island-model AlphaZero with cross-play
 python -m train.island_coach --islands 5 --iterations 100 --games 100 --sims 100
@@ -138,6 +144,7 @@ train/              AlphaZero training
 
 ga_evolve.py        Island-model GA with ring topology (14-weight eval function)
 fast_train.py       Endgame bootstrap training (random games -> value head)
+train_from_ga.py    League training: NN vs GA + self + weaker self (Attempt 13 — 50% ceiling)
 train_vs_ga.py      Train NN against GA (Attempt 11 — failed)
 train_distill.py    Distill GA self-play into NN (Attempt 12 — failed)
 
@@ -149,7 +156,7 @@ tests/              Game engine tests
 
 ## Further reading
 
-- `DESIGN_DECISIONS.md` — full training history (12 attempts, what worked and what didn't)
+- `DESIGN_DECISIONS.md` — full training history (13 attempts, what worked and what didn't)
 - `BRANCHING.md` — why branching factor is irrelevant to evaluation-based AI
 
 ## License

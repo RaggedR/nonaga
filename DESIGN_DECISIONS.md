@@ -445,3 +445,47 @@ Tested whether using the policy head for move selection (instead of value head g
 **Finding**: GA imitation training destroyed island 2's learned strategy (50% → 0%). The policy and value heads are roughly equivalent for strong models (island 2: 50% either way). The training-against-GA approach poisoned the weights by training on positions from the NN's own bad play.
 
 **Conclusion**: Island-model AlphaZero with cross-play (Attempt 10, Phase 2) remains the best NN training approach — island 2 at iteration 20 is the strongest NN checkpoint at 50/50 against the GA. The GA's 14 evolved weights remain unbeaten.
+
+## Attempt 13: League Training (`train_from_ga.py`)
+
+### Phase 1: Supervised from GA-vs-noisy-GA (failed to stabilise)
+
+- **Idea**: GA plays against noisy versions of itself (GA weights + N(0,1.0) noise). This produces 85% decisive games from strong play, fixing Attempt 12's draw problem. Train NN supervised on these positions with GA evaluation as value target and GA move distribution as policy target.
+- **Result**: Hit 50% vs GA at epoch 14 of 30, but regressed to 0% by epoch 19 and never recovered. Self-play refinement (Stage 3) also stuck at 0%.
+- **Why it was unstable**: The NN was only seeing positions from GA play — it learned to evaluate GA-style positions but couldn't generate them itself. The moment it started playing (eval or self-play), it entered unfamiliar territory and collapsed.
+
+### Phase 2: League training (the current approach)
+
+Each iteration, the NN plays three types of opponents simultaneously:
+
+1. **vs GA** — aspirational losses. The NN loses every game but learns what strong positions look like from the losing side. Provides negative value signal.
+2. **vs self** — competitive games at its own level. Epsilon-greedy exploration creates the skill asymmetry needed for decisive outcomes. Provides balanced signal.
+3. **vs weaker self** — the NN plays earlier checkpoints of itself. Gets wins, learns what winning positions look like. Provides positive value signal.
+
+"Weaker self" starts as random (iteration 0, no history) and transitions to historical checkpoints (picking from ~halfway through the checkpoint history for moderate weakness).
+
+Only the value head is trained — policy targets are not used. Move selection uses greedy 1-ply on the value head, same as the GA.
+
+**Key design choice**: Best checkpoint is tracked and preserved separately (`checkpoints/league/best.pt`). Training continues past the peak, but the best weights are never overwritten. Early stopping after N iterations without improvement.
+
+**Parameters**:
+- 30 iterations, 100 games per opponent per iteration (300 games total)
+- 3 training epochs per iteration
+- 15% epsilon-greedy exploration during data generation
+- D6 augmentation (12× data)
+- Patience: 10 iterations without improvement → stop
+- Value-only training (no policy loss)
+
+**Smoke test result** (3 iterations, 10 games/opponent, from scratch):
+- Iter 0: 0% vs GA eval
+- Iter 1: **50% vs GA** (5-5-0 on 10 games)
+- Iter 2: 0% vs GA (regressed)
+- Best checkpoint (iter 1) loaded for final eval: **50-50-0 (50%) over 100 games**
+
+The 50% result from a from-scratch NN in 2 iterations (~2 minutes) matches what island-model AlphaZero achieved after 53 iterations (~18 hours). The league's diverse signal — wins, losses, and competitive games in every iteration — gives the value head what it needs from the start.
+
+**Full run**: Not pursued. The starting checkpoint (`from_ga/best_stage2.pt`) already evaluated at 50/50 vs GA before any league training began — the same ceiling hit by island-model AlphaZero. The smoke test confirmed the league reaches this ceiling faster (2 iterations vs 53) but doesn't break through it. The 50% barrier appears to be a hard limit for NN evaluation in Nonaga, regardless of training method.
+
+## Conclusion
+
+After 13 training approaches spanning endgame bootstrap, curriculum learning, draw shaping, MCTS sign fixes, full AlphaZero self-play, island-model GA, island-model AlphaZero with cross-play, GA imitation, GA self-play distillation, and league training, the result is clear: **14 evolved weights > 570K neural network parameters** for Nonaga. The GA's evaluation function captures the game's strategic structure directly in a 14-dimensional space that AlphaZero's self-play loop cannot reliably discover from raw board state. The best any NN achieved was 50/50 against the GA — a ceiling hit by three independent approaches (island AlphaZero, supervised from GA, league training) but never broken.
