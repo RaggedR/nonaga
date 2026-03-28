@@ -39,6 +39,10 @@ The core issue is that too many self-play games end in draws, which means the va
 
 See `TRAINING_NOTES.md` for the full history of what we've tried.
 
+### The GA alternative
+
+We found the same pattern in **Blokus** — see [MCTS_Laboratory PR #107](https://github.com/TGALLOWAY1/MCTS_Laboratory/pull/107). An Island-Model Genetic Algorithm evolving 10 heuristic feature weights (zero lookahead) beat FastMCTS 8-to-1 in a 4-player Blokus arena. The insight is the same as Nonaga: **features matter more than search when rollout quality is poor.** In both games, high branching factors (~80-500 in Blokus, ~300 in Nonaga) make random rollouts nearly uninformative, so MCTS wastes compute on noise while a well-tuned evaluation function captures strategic knowledge directly.
+
 ### Train it yourself
 
 ```bash
